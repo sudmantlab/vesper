@@ -1,0 +1,20 @@
+name: vesper
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.8
+  - pysam=0.21.0
+  - intervaltree=3.1.0
+  - pandas=2.0.0
+  - gffutils=0.12.0
+  - numpy=1.24.0
+  # Development tools
+  - pytest=7.0.0
+  - pytest-cov=4.0.0
+  - black=23.0.0
+  - isort=5.0.0
+  - pip
+  - pip: # note that this is specifically for development and sghould be fixed later
+    - -e . 

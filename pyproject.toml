@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vesper"
+version = "0.1.0"
+description = "Ultra-low frequency structural variant calling for PacBio HiFi data."
+authors = [
+    { name = "voidshapes", email = "test_email@pleaseignore.com" }
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "pysam>=0.21.0",
+    "intervaltree>=3.1.0",
+    "pandas>=2.0.0",
+    "gffutils>=0.12.0",
+    "numpy>=1.24.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0"
+]
+
+[project.scripts]
+vesper = "vesper.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=vesper"
