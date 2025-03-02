@@ -1,6 +1,6 @@
 # vesper
 
-`vesper` is a haplotype-aware *de novo* structural variant caller for PacBio HiFi data.
+`vesper` is a haplotype-aware *de novo* structural variant caller  for PacBio HiFi data.
 
 ```
 vesper/
