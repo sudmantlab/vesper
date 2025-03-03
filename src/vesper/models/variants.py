@@ -104,37 +104,6 @@ class VariantAnalysis:
         self.support_reads = support_reads
         self.nonsupport_reads = nonsupport_reads
     
-    def add_annotations(self, processor: "AnnotationProcessor", proximal_span: int = 500) -> None:
-        """Add overlapping and proximal annotations.
-        
-        Args:
-            processor: AnnotationProcessor instance to query
-            proximal_span: +/- span (bp) to search for proximal features
-        """
-        # Find directly overlapping features at the breakpoint
-        overlaps = processor.find_overlaps(
-            self.variant.contig,
-            self.variant.position
-        )
-        self.overlapping_features.extend(overlaps)
-        
-        # Find proximal features at the breakpoint
-        proximal = processor.find_proximal(
-            self.variant.contig,
-            self.variant.position,
-            proximal_span
-        )
-        
-        # Add proximal features, excluding any that overlap
-        seen = set()
-        overlapping_keys = {(f.chrom, f.start, f.end) for f in self.overlapping_features}
-        
-        for feature in proximal:
-            feature_key = (feature.chrom, feature.start, feature.end)
-            if feature_key not in seen and feature_key not in overlapping_keys:
-                self.proximal_features.append(feature)
-                seen.add(feature_key)
-    
     def calculate_confidence(self):
         """calculate confidence score based on metrics and annotations
         

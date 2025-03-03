@@ -63,7 +63,7 @@ class ReadProcessor:
                 
         return ReadGroup(support_reads), ReadGroup(nonsupport_reads)
     
-    def _fetch_reads(self, variant: Variant, window_size: int = 1000) -> Iterator[AlignedRead]:
+    def _fetch_reads(self, variant: Variant, window_size: int = 500) -> Iterator[AlignedRead]:
         """Fetch all reads from region around variant (including non-primary alignments).
         
         Args:

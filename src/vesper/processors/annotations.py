@@ -33,7 +33,18 @@ class AnnotationProcessor(ABC):
         self.logger = logging.getLogger(__name__)
         self.filepath = Path(filepath)
         self.db_path: Optional[Path] = None
-        self.conn = None
+        self._local = threading.local()
+        self._local.conn = None
+
+    def _get_connection(self):
+        """Get a thread-local connection to the database."""
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(str(self.db_path))
+            self._local.conn.row_factory = sqlite3.Row
+            # Enable optimizations
+            self._local.conn.execute("PRAGMA cache_size = -10000")  # 10MB cache
+            self._local.conn.execute("PRAGMA temp_store = MEMORY")
+        return self._local.conn
 
     def __enter__(self):
         """Initialize database connection and build if needed."""
@@ -44,8 +55,7 @@ class AnnotationProcessor(ABC):
             self.logger.info(f"Database not found, building new database for {self.filepath}")
             self._build_sqlite_db()
         
-        self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
+        self.conn = self._get_connection()
         
         # check if database is properly initialized
         try:
@@ -54,9 +64,8 @@ class AnnotationProcessor(ABC):
                 self.logger.warning(f"Database exists but appears invalid, rebuilding: {self.db_path}")
                 self.conn.close()
                 self.db_path.unlink()
-                self._build_sqlite_db()
-                self.conn = sqlite3.connect(str(self.db_path))
-                self.conn.row_factory = sqlite3.Row
+                self._build_sqlite_db(rebuild=True)
+                self.conn = self._get_connection()
         except sqlite3.Error as e:
             self.logger.error(f"Error verifying database: {e}")
             if self.conn:
@@ -68,9 +77,9 @@ class AnnotationProcessor(ABC):
     
     def close(self):
         """Close the database connection."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
@@ -90,8 +99,7 @@ class AnnotationProcessor(ABC):
         Returns:
             List of GenomicInterval objects
         """
-        if not self.conn:
-            raise RuntimeError("Database connection not initialized. Use with-statement to open processor.")
+        conn = self._get_connection()
             
         query = '''
             SELECT * FROM intervals
@@ -99,7 +107,7 @@ class AnnotationProcessor(ABC):
             AND start <= ? AND end >= ?
         '''
         
-        cursor = self.conn.execute(query, (chrom, pos, pos))
+        cursor = conn.execute(query, (chrom, pos, pos))
         
         return [GenomicInterval(
             chrom=row['chrom'],
@@ -119,71 +127,8 @@ class AnnotationProcessor(ABC):
         Returns:
             List of GenomicInterval objects
         """
-        if not self.conn:
-            raise RuntimeError("Database connection not initialized. Use with-statement to open processor.")
+        conn = self._get_connection()
             
-        start = max(1, pos - span)
-        end = pos + span
-        
-        query = '''
-            SELECT *, 
-                   MIN(ABS(start - ?), ABS(end - ?)) as distance
-            FROM intervals
-            WHERE chrom = ?
-            AND ((start BETWEEN ? AND ?) OR (end BETWEEN ? AND ?))
-            ORDER BY distance
-        '''
-        
-        cursor = self.conn.execute(query, (pos, pos, chrom, start, end, start, end))
-        
-        return [GenomicInterval(
-            chrom=row['chrom'],
-            start=row['start'],
-            end=row['end'],
-            metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
-        ) for row in cursor.fetchall()]
-
-class BEDProcessor(AnnotationProcessor):
-    """Thread-safe implementation of BED file processor that uses thread-local sqlite connections."""
-    
-    def __init__(self, filepath: Union[str, Path]):
-        super().__init__(filepath)
-        self._local = threading.local()
-        self._local.conn = None
-        
-    def _get_connection(self):
-        """Get a thread-local connection to the database."""
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(str(self.db_path))
-            self._local.conn.row_factory = sqlite3.Row
-            # Enable optimizations
-            self._local.conn.execute("PRAGMA cache_size = -10000")  # 10MB cache
-            self._local.conn.execute("PRAGMA temp_store = MEMORY")
-        return self._local.conn
-
-    def find_overlaps(self, chrom: str, pos: int) -> List[GenomicInterval]:
-        """Thread-safe implementation of find_overlaps using thread-local connections."""
-        conn = self._get_connection()
-        
-        query = '''
-            SELECT * FROM intervals
-            WHERE chrom = ?
-            AND start <= ? AND end >= ?
-        '''
-        
-        cursor = conn.execute(query, (chrom, pos, pos))
-        
-        return [GenomicInterval(
-            chrom=row['chrom'],
-            start=row['start'],
-            end=row['end'],
-            metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end')}
-        ) for row in cursor.fetchall()]
-
-    def find_proximal(self, chrom: str, pos: int, span: int = 100) -> List[GenomicInterval]:
-        """Thread-safe implementation of find_proximal using thread-local connections."""
-        conn = self._get_connection()
-        
         start = max(1, pos - span)
         end = pos + span
         
@@ -205,27 +150,21 @@ class BEDProcessor(AnnotationProcessor):
             metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
         ) for row in cursor.fetchall()]
 
-    def process_single_variant(self, variant, proximal_span=500):
-        """Process a single variant, adding annotations directly."""
-        if variant.variant.sv_type.name != 'INS':
-            return
-            
-        # Find directly overlapping features at the breakpoint
+    def _annotate_variant(self, variant, proximal_span) -> None:
+        """Annotate a single variant."""
         overlaps = self.find_overlaps(
             variant.variant.contig,
             variant.variant.position
         )
         variant.overlapping_features.extend(overlaps)
         
-        # Find proximal features at the breakpoint
         proximal = self.find_proximal(
             variant.variant.contig,
             variant.variant.position,
             proximal_span
         )
         
-        # Add proximal features, excluding any that overlap
-        seen = set()
+        seen = set() # avoid duplicates
         overlapping_keys = {(f.chrom, f.start, f.end) for f in variant.overlapping_features}
         
         for feature in proximal:
@@ -234,46 +173,39 @@ class BEDProcessor(AnnotationProcessor):
                 variant.proximal_features.append(feature)
                 seen.add(feature_key)
     
-    def process_variants_parallel(self, variants, proximal_span=500, n_workers=None):
-        """Process variants in parallel using thread pool.
-        
-        This avoids multiprocessing complexity by using threads with thread-local
-        connections, which is still effective for I/O bound operations.
+    def annotate_variants(self, variants, proximal_span=500, n_workers=None) -> None:
+        """Annotate variants in parallel using thread pool.
         
         Args:
             variants: List of VariantAnalysis objects
-            proximal_span: Distance for proximal feature search
+            proximal_span: +/- window for proximal feature search
             n_workers: Number of worker threads (defaults to 2x CPU count for I/O bound)
         """
-        if n_workers is None:
-            # For I/O bound, can use more threads than cores
+        if n_workers is None: # default to 2x CPU count
             n_workers = min(32, max(4, os.cpu_count() * 2))
-            
-        # Filter to insertion variants first
-        ins_variants = [v for v in variants if v.variant.sv_type.name == 'INS']
         
-        self.logger.info(f"Processing {len(ins_variants)} variants with {n_workers} threads")
+        self.logger.info(f"Annotating {len(variants)} variants with {n_workers} threads")
         start_time = time.time()
-        
-        # Process in batches using thread pool
+
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            # Submit all variants to the pool
-            futures = [executor.submit(self.process_single_variant, variant, proximal_span) 
-                      for variant in ins_variants]
+            futures = [executor.submit(self._annotate_variant, variant, proximal_span) 
+                      for variant in variants]
             
-            # Wait for completion and count processed
             completed = 0
             total = len(futures)
             for future in futures:
-                # This will raise any exceptions from the thread
                 future.result()
                 completed += 1
                 if completed % 100 == 0 or completed == total:
                     self.logger.info(f"Progress: {completed}/{total} variants processed")
         
         elapsed = time.time() - start_time
-        self.logger.info(f"Completed processing {len(ins_variants)} variants in {elapsed:.2f} seconds")
+        self.logger.info(f"Completed annotating {len(variants)} variants in {elapsed:.2f} seconds")
 
+
+class BEDProcessor(AnnotationProcessor):
+    """Implementation of BED file processor."""
+    
     def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'BEDProcessor':
         """Create a new SQLite database from a BED file if it doesn't already exist.
         
