@@ -11,6 +11,16 @@ from vesper.processors.annotations import BEDProcessor
 from vesper.models.variants import VariantAnalysis
 from vesper.utils.config import Config
 
+def display_logo():
+    """Display the vesper logo from the utils/logo.txt file."""
+    logo_path = Path(__file__).parents[1] / "src/vesper/utils/vesper_logo.txt"
+    try:
+        with open(logo_path, 'r') as f:
+            logo = f.read()
+            print(logo)
+    except FileNotFoundError:
+        # That's weird, but we'll just print some text instead
+        print("vesper - Haplotype-aware structural variant calling")
 
 def setup_logging():
     """Configure basic logging."""
@@ -103,6 +113,7 @@ def parse_args():
 
 def main():
     """Main entry point demonstrating the full variant analysis pipeline."""
+    display_logo()
     args = parse_args()
     logger = setup_logging()
     
