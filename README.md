@@ -109,6 +109,8 @@ pip freeze > requirements.txt
 
 For venv:
 ```bash
+# if in venv, deactivate it
+deactivate
 # Remove old environment
 rm -rf venv/
 # Create new one following installation steps
