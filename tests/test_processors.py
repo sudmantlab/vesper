@@ -296,7 +296,7 @@ def test_variant_analysis_annotation(minimal_vcf, minimal_bed):
         analysis = VariantAnalysis(first_var)
         bed_proc = BEDProcessor(minimal_bed)
         
-        analysis.add_annotations(bed_proc)
+        analysis.annotate_single_variant(bed_proc)
         
         # Should overlap repeat1 and SNP1
         assert len(analysis.overlapping_features) == 2
@@ -318,7 +318,7 @@ def test_variant_analysis_custom_span(minimal_vcf, minimal_bed):
         analysis = VariantAnalysis(second_var)
         bed_proc = BEDProcessor(minimal_bed)
         
-        analysis.add_annotations(bed_proc, proximal_span=1000)
+        analysis.annotate_single_variant(bed_proc, proximal_span=1000)
         
         # Should have 1 overlapping feature (repeat2)
         assert len(analysis.overlapping_features) == 1
@@ -341,7 +341,7 @@ def test_variant_analysis_no_annotations(minimal_vcf, minimal_bed):
         bed_proc = BEDProcessor(minimal_bed)
         
         # Add annotations
-        analysis.add_annotations(bed_proc)
+        analysis.annotate_single_variant(bed_proc)
         
         assert len(analysis.overlapping_features) == 0
         assert len(analysis.proximal_features) == 0

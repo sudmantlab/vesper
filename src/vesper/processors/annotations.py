@@ -3,8 +3,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union
 import logging
-
 import sqlite3
+import threading
+import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 
 @dataclass
@@ -30,7 +33,18 @@ class AnnotationProcessor(ABC):
         self.logger = logging.getLogger(__name__)
         self.filepath = Path(filepath)
         self.db_path: Optional[Path] = None
-        self.conn = None
+        self._local = threading.local()
+        self._local.conn = None
+
+    def _get_connection(self):
+        """Get a thread-local connection to the database."""
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(str(self.db_path))
+            self._local.conn.row_factory = sqlite3.Row
+            # Enable optimizations
+            self._local.conn.execute("PRAGMA cache_size = -10000")  # 10MB cache
+            self._local.conn.execute("PRAGMA temp_store = MEMORY")
+        return self._local.conn
 
     def __enter__(self):
         """Initialize database connection and build if needed."""
@@ -41,8 +55,7 @@ class AnnotationProcessor(ABC):
             self.logger.info(f"Database not found, building new database for {self.filepath}")
             self._build_sqlite_db()
         
-        self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
+        self.conn = self._get_connection()
         
         # check if database is properly initialized
         try:
@@ -51,9 +64,8 @@ class AnnotationProcessor(ABC):
                 self.logger.warning(f"Database exists but appears invalid, rebuilding: {self.db_path}")
                 self.conn.close()
                 self.db_path.unlink()
-                self._build_sqlite_db()
-                self.conn = sqlite3.connect(str(self.db_path))
-                self.conn.row_factory = sqlite3.Row
+                self._build_sqlite_db(rebuild=True)
+                self.conn = self._get_connection()
         except sqlite3.Error as e:
             self.logger.error(f"Error verifying database: {e}")
             if self.conn:
@@ -65,9 +77,9 @@ class AnnotationProcessor(ABC):
     
     def close(self):
         """Close the database connection."""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
@@ -87,8 +99,7 @@ class AnnotationProcessor(ABC):
         Returns:
             List of GenomicInterval objects
         """
-        if not self.conn:
-            raise RuntimeError("Database connection not initialized. Use with-statement to open processor.")
+        conn = self._get_connection()
             
         query = '''
             SELECT * FROM intervals
@@ -96,7 +107,7 @@ class AnnotationProcessor(ABC):
             AND start <= ? AND end >= ?
         '''
         
-        cursor = self.conn.execute(query, (chrom, pos, pos))
+        cursor = conn.execute(query, (chrom, pos, pos))
         
         return [GenomicInterval(
             chrom=row['chrom'],
@@ -116,8 +127,7 @@ class AnnotationProcessor(ABC):
         Returns:
             List of GenomicInterval objects
         """
-        if not self.conn:
-            raise RuntimeError("Database connection not initialized. Use with-statement to open processor.")
+        conn = self._get_connection()
             
         start = max(1, pos - span)
         end = pos + span
@@ -131,7 +141,7 @@ class AnnotationProcessor(ABC):
             ORDER BY distance
         '''
         
-        cursor = self.conn.execute(query, (pos, pos, chrom, start, end, start, end))
+        cursor = conn.execute(query, (pos, pos, chrom, start, end, start, end))
         
         return [GenomicInterval(
             chrom=row['chrom'],
@@ -139,8 +149,34 @@ class AnnotationProcessor(ABC):
             end=row['end'],
             metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
         ) for row in cursor.fetchall()]
+    
+    def _annotate_variant(self, variant, proximal_span) -> None:
+        """Annotate a single variant."""
+        overlaps = self.find_overlaps(
+            variant.variant.contig,
+            variant.variant.position
+        )
+        variant.overlapping_features.extend(overlaps)
+        
+        proximal = self.find_proximal(
+            variant.variant.contig,
+            variant.variant.position,
+            proximal_span
+        )
+        
+        seen = set() # avoid duplicates
+        overlapping_keys = {(f.chrom, f.start, f.end) for f in variant.overlapping_features}
+        
+        for feature in proximal:
+            feature_key = (feature.chrom, feature.start, feature.end)
+            if feature_key not in seen and feature_key not in overlapping_keys:
+                variant.proximal_features.append(feature)
+                seen.add(feature_key)
+
 
 class BEDProcessor(AnnotationProcessor):
+    """Implementation of BED file processor."""
+    
     def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'BEDProcessor':
         """Create a new SQLite database from a BED file if it doesn't already exist.
         

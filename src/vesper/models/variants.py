@@ -1,11 +1,13 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, ClassVar, Pattern, Dict
+from typing import List, Optional, ClassVar, Pattern, Dict, Any
 import re
 import numpy as np
 from enum import Enum, auto
 
+import logging
+
 from ..processors.annotations import GenomicInterval
-from .reads import AlignedRead
+from .reads import AlignedRead, ReadGroup
 
 class SVType(Enum):
     """Structural variant type classifications for downstream logic."""
@@ -83,19 +85,24 @@ class Variant:
 class VariantAnalysis:
     """Mutable wrapper object for variant analysis and annotation."""
     variant: Variant
-    support_reads: List[AlignedRead] = field(default_factory=list)
-    nonsupport_reads: List[AlignedRead] = field(default_factory=list)
-    support_metrics: Optional[Dict] = None #todo
-    nonsupport_metrics: Optional[Dict] = None #todo
+    support_reads: ReadGroup = field(default_factory=lambda: ReadGroup([]))
+    nonsupport_reads: ReadGroup = field(default_factory=lambda: ReadGroup([]))
+    metrics: Dict[str, Any] = field(default_factory=dict)
     overlapping_features: List[GenomicInterval] = field(default_factory=list)
     proximal_features: List[GenomicInterval] = field(default_factory=list)
     confidence: float = 0.0
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
     def __repr__(self) -> str:
-        return f"\n{self.variant},\nconfidence={self.confidence},\nsupport_reads={len(self.support_reads)},\nnonsupport_reads={len(self.nonsupport_reads)},\noverlapping_features={len(self.overlapping_features)},\nproximal_features={len(self.proximal_features)}"
+        return (f"\n{self.variant},\nconfidence={self.confidence},\nsupport_reads={len(self.support_reads)},\n"
+                f"nonsupport_reads={len(self.nonsupport_reads)},\n"
+                f"overlapping_features={len(self.overlapping_features)},\n"
+                f"proximal_features={len(self.proximal_features)}")
 
-    def add_locus_reads(self, processor: "ReadProcessor") -> None:
-        """Add supporting and non-supporting reads to variant.
+    # This method is no longer used - reads are directly assigned in ReadProcessor.process_variants
+    # Keeping for backwards compatibility
+    def _add_read_groups(self, processor) -> None:
+        """Add supporting and non-supporting read groups.
         
         Args:
             processor: ReadProcessor instance
@@ -104,40 +111,48 @@ class VariantAnalysis:
         self.support_reads = support_reads
         self.nonsupport_reads = nonsupport_reads
     
-    def add_annotations(self, processor: "AnnotationProcessor", proximal_span: int = 500) -> None:
-        """Add overlapping and proximal annotations.
+    def _calculate_grouped_metrics(self) -> None:
+        """Calculate metrics based on read groups."""
+        if not self.support_reads.reads or not self.nonsupport_reads.reads:
+            self.logger.warning(f"Missing reads for variant {self.variant.ID}, skipping metrics calculation")
+            return
+
+        # Get basic read counts
+        self.metrics['n_support'] = len(self.support_reads)
+        self.metrics['n_nonsupport'] = len(self.nonsupport_reads)
         
-        Args:
-            processor: AnnotationProcessor instance to query
-            proximal_span: +/- span (bp) to search for proximal features
+        # Get read quality metrics
+        self.metrics['support_mapq'] = self.support_reads.mean_mapq
+        self.metrics['nonsupport_mapq'] = self.nonsupport_reads.mean_mapq
+        
+        # Get soft-clipping metrics
+        self.metrics['support_softclip'] = self.support_reads.soft_clip_stats
+        self.metrics['nonsupport_softclip'] = self.nonsupport_reads.soft_clip_stats
+
+        # Comparison metrics
+        self.metrics['comparison'] = self.support_reads.compare_stats(self.nonsupport_reads)
+            
+    def _calculate_confidence(self) -> None:
+        """Basic confidence calculation based on mapq differential and softclipping.
+        
+        Should be called after _calculate_grouped_metrics() and adding annotations.
         """
-        # Find directly overlapping features at the breakpoint
-        overlaps = processor.find_overlaps(
-            self.variant.contig,
-            self.variant.position
-        )
-        self.overlapping_features.extend(overlaps)
+        if not self.metrics:
+            self.confidence = 0.0
+            return
+            
+        # Calculate mapq differential between support and nonsupport reads
+        mapq_diff = self.metrics['comparison']['mapq_mean'] - self.metrics['comparison']['mapq_mean_other']
         
-        # Find proximal features at the breakpoint
-        proximal = processor.find_proximal(
-            self.variant.contig,
-            self.variant.position,
-            proximal_span
-        )
+        # Calculate softclip differential between support and nonsupport reads
+        support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
+        nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
+        softclip_diff = support_pct - nonsupport_pct
         
-        # Add proximal features, excluding any that overlap
-        seen = set()
-        overlapping_keys = {(f.chrom, f.start, f.end) for f in self.overlapping_features}
+        # scaling
+        mapq_factor = min(max(mapq_diff / 60.0, 0), 1)  # max mapq of 60
+        softclip_factor = min(max(-softclip_diff / 50.0, 0), 1)  # less softclipping is better
         
-        for feature in proximal:
-            feature_key = (feature.chrom, feature.start, feature.end)
-            if feature_key not in seen and feature_key not in overlapping_keys:
-                self.proximal_features.append(feature)
-                seen.add(feature_key)
+        # TODO: fix weighting
+        self.confidence = (mapq_factor * 0.7) + (softclip_factor * 0.3)
     
-    def calculate_confidence(self):
-        """calculate confidence score based on metrics and annotations
-        
-        TODO: implement actual confidence calculation logic
-        """
-        self.confidence = 0.0
