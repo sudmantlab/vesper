@@ -8,7 +8,11 @@ class Config:
     # Input/output files
     vcf_input: Path
     bam_file: Path
-    vcf_output: Path
+    output_dir: Path
+    
+    # Registry configuration
+    auto_load_registry: bool = True  # Whether to automatically load existing registry if found
+    force_new_registry: bool = False  # Force creation of new registry even if one exists
     
     # Parameters
     min_support: int = 1
@@ -22,9 +26,11 @@ class Config:
     def from_args(cls, args):
         """Create Config instance from parsed command line arguments."""
         return cls(
-            vcf_input=Path(args.input),
+            vcf_input=Path(args.vcf),
             bam_file=Path(args.bam),
-            vcf_output=Path(args.output),
+            output_dir=Path(args.output_dir),
+            auto_load_registry=args.auto_load_registry == 'True',  # Convert string to bool
+            force_new_registry=args.force_new_registry,
             min_support=args.min_support,
             max_af=args.max_af,
             log_dir=args.logging,

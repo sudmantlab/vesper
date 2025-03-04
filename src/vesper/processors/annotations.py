@@ -149,29 +149,6 @@ class AnnotationProcessor(ABC):
             end=row['end'],
             metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
         ) for row in cursor.fetchall()]
-
-    def _annotate_variant(self, variant, proximal_span) -> None:
-        """Annotate a single variant."""
-        overlaps = self.find_overlaps(
-            variant.variant.contig,
-            variant.variant.position
-        )
-        variant.overlapping_features.extend(overlaps)
-        
-        proximal = self.find_proximal(
-            variant.variant.contig,
-            variant.variant.position,
-            proximal_span
-        )
-        
-        seen = set() # avoid duplicates
-        overlapping_keys = {(f.chrom, f.start, f.end) for f in variant.overlapping_features}
-        
-        for feature in proximal:
-            feature_key = (feature.chrom, feature.start, feature.end)
-            if feature_key not in seen and feature_key not in overlapping_keys:
-                variant.proximal_features.append(feature)
-                seen.add(feature_key)
     
     def annotate_variants(self, variants, proximal_span=500, n_workers=None) -> None:
         """Annotate variants in parallel using thread pool.
@@ -201,6 +178,29 @@ class AnnotationProcessor(ABC):
         
         elapsed = time.time() - start_time
         self.logger.info(f"Completed annotating {len(variants)} variants in {elapsed:.2f} seconds")
+
+    def _annotate_variant(self, variant, proximal_span) -> None:
+        """Annotate a single variant."""
+        overlaps = self.find_overlaps(
+            variant.variant.contig,
+            variant.variant.position
+        )
+        variant.overlapping_features.extend(overlaps)
+        
+        proximal = self.find_proximal(
+            variant.variant.contig,
+            variant.variant.position,
+            proximal_span
+        )
+        
+        seen = set() # avoid duplicates
+        overlapping_keys = {(f.chrom, f.start, f.end) for f in variant.overlapping_features}
+        
+        for feature in proximal:
+            feature_key = (feature.chrom, feature.start, feature.end)
+            if feature_key not in seen and feature_key not in overlapping_keys:
+                variant.proximal_features.append(feature)
+                seen.add(feature_key)
 
 
 class BEDProcessor(AnnotationProcessor):

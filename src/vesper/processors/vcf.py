@@ -6,16 +6,14 @@ import logging
 
 from ..models.variants import Variant, SVType, VariantAnalysis
 from ..models.reads import ReadGroup, AlignedRead
-from .reads import ReadProcessor
 
 
 class VCFProcessor:
     """Handles reading and writing VCF files."""
     
-    def __init__(self, vcf_path: Path, read_processor: Optional[ReadProcessor] = None):
+    def __init__(self, vcf_path: Path):
         self.vcf_path = vcf_path
         self._vcf: Optional[pysam.VariantFile] = None
-        self.read_processor = read_processor
         self.logger = logging.getLogger(__name__)
     
     def __enter__(self):
@@ -46,11 +44,10 @@ class VCFProcessor:
         """Create VariantAnalysis objects from records in a VCF file.
         
         Args:
-            test_mode: If True, only loads first 25 records from VCF
+            test_mode: If True, only loads first 100 records from VCF
         
         Yields:
-            Variant objects for each record in the VCF OR VariantAnalysis objects for each
-            record in the VCF if a ReadProcessor was provided to VCFProcessor
+            VariantAnalysis objects for each record in the VCF
             
         Raises:
             RuntimeError: if VCF file not opened
@@ -65,16 +62,8 @@ class VCFProcessor:
                 
             try:
                 base_variant = Variant.from_pysam_record(record)
-                if base_variant.sv_type == SVType.INS and base_variant.DR < 80: # TEMP FILTER
-                    analysis = VariantAnalysis(variant=base_variant)
-                else:
-                    continue
-                
-                # Add reads if we have a processor - TODO: HANDLE THIS LATER ON A LAZY BASIS
-                if self.read_processor:
-                    analysis.add_locus_reads(self.read_processor)
+                analysis = VariantAnalysis(variant=base_variant)
                 yield analysis
-                
             except Exception as e:
                 raise type(e)(f"Invalid variant record: {str(e)}") from e
     

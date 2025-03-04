@@ -63,11 +63,11 @@ class AlignedRead:
     def methylation(self) -> Optional[str]:
         return self._read.get_tag('MM') if self._read.has_tag('MM') else None
 
-    @property
+    @cached_property
     def soft_clip_left(self) -> int:
         return self.cigartuples[0][1] if self.cigartuples[0][0] == 4 else 0
 
-    @property
+    @cached_property
     def soft_clip_right(self) -> int:
         return self.cigartuples[-1][1] if self.cigartuples[-1][0] == 4 else 0
 
@@ -90,17 +90,36 @@ class AlignedRead:
 
 @dataclass
 class ReadGroup:
+    """A group of aligned reads with methods for calculating aggregate statistics.
+    
+    Attributes:
+        reads: List of AlignedRead objects in this group
+    """
     reads: List[AlignedRead]
     
     def __len__(self) -> int:
+        """Return the number of reads in this group."""
         return len(self.reads)
     
-    @property
+    @cached_property
     def mean_mapq(self) -> float:
+        """Calculate the mean mapping quality across all reads.
+        
+        Returns:
+            Mean mapping quality value
+        """
         return sum(r.mapq for r in self.reads) / len(self)
     
-    @property
+    @cached_property
     def soft_clip_stats(self) -> Dict[str, float]:
+        """Calculate soft-clipping statistics across all reads.
+        
+        Returns:
+            Dictionary containing:
+                - pct_softclipped: Percentage of total bases that are soft-clipped
+                - mean_left_clip: Average number of soft-clipped bases on left end
+                - mean_right_clip: Average number of soft-clipped bases on right end
+        """
         total_len = sum(r.length for r in self.reads)
         total_soft = sum(r.cigar_stats.get('S', 0) for r in self.reads)
         return {
@@ -109,12 +128,33 @@ class ReadGroup:
             'mean_right_clip': sum(r.soft_clip_right for r in self.reads) / len(self)
         }
     
-    def compare_stats(self, other: 'ReadGroup') -> Dict[str, float]:
-        query, subject = self.soft_clip_stats, other.soft_clip_stats
+    @cached_property
+    def cigar_stats(self) -> Dict[str, int]:
+        """Calculate aggregate CIGAR statistics across all reads.
         
+        Returns:
+            Dictionary mapping CIGAR operations to their total counts
+        """
+        total_cigar_stats = {}
+        for r in self.reads:
+            for op, count in r.cigar_stats.items():
+                total_cigar_stats[op] = total_cigar_stats.get(op, 0) + count
+        return total_cigar_stats
+
+    def compare_stats(self, other: 'ReadGroup') -> Dict[str, float]:
+        """Calculate comparison statistics between this read group and another.
+        
+        Args:
+            other: Another ReadGroup to compare against
+            
+        Returns:
+            Dictionary of comparison statistics between the two read groups
+        """
         return {
-            'mapq_differential': self.mean_mapq - other.mean_mapq,
-            'softclip_pct_differential': query['pct_softclipped'] - subject['pct_softclipped'],
-            'left_clip_differential': query['mean_left_clip'] - subject['mean_left_clip'], 
-            'right_clip_differential': query['mean_right_clip'] - subject['mean_right_clip']
+            'mapq_mean': self.mean_mapq,
+            'mapq_mean_other': other.mean_mapq,
+            'softclip_stats': self.soft_clip_stats,
+            'softclip_stats_other': other.soft_clip_stats,
+            'cigar_stats': self.cigar_stats,
+            'cigar_stats_other': other.cigar_stats
         }

@@ -1,4 +1,4 @@
-from .variants import VCFProcessor
+from .vcf import VCFProcessor
 from .reads import ReadProcessor
 from .annotations import AnnotationProcessor, BEDProcessor, GenomicInterval
 
