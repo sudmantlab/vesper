@@ -150,35 +150,6 @@ class AnnotationProcessor(ABC):
             metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
         ) for row in cursor.fetchall()]
     
-    def annotate_variants(self, variants, proximal_span=500, n_workers=None) -> None:
-        """Annotate variants in parallel using thread pool.
-        
-        Args:
-            variants: List of VariantAnalysis objects
-            proximal_span: +/- window for proximal feature search
-            n_workers: Number of worker threads (defaults to 2x CPU count for I/O bound)
-        """
-        if n_workers is None: # default to 2x CPU count
-            n_workers = min(32, max(4, os.cpu_count() * 2))
-        
-        self.logger.info(f"Annotating {len(variants)} variants with {n_workers} threads")
-        start_time = time.time()
-
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            futures = [executor.submit(self._annotate_variant, variant, proximal_span) 
-                      for variant in variants]
-            
-            completed = 0
-            total = len(futures)
-            for future in futures:
-                future.result()
-                completed += 1
-                if completed % 100 == 0 or completed == total:
-                    self.logger.info(f"Progress: {completed}/{total} variants processed")
-        
-        elapsed = time.time() - start_time
-        self.logger.info(f"Completed annotating {len(variants)} variants in {elapsed:.2f} seconds")
-
     def _annotate_variant(self, variant, proximal_span) -> None:
         """Annotate a single variant."""
         overlaps = self.find_overlaps(

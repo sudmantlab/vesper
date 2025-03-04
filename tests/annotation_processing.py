@@ -176,22 +176,3 @@ def test_query_nonexistent_region(simple_bed):
         
         proximal = bed_proc.find_proximal('chr3', 1000, 1000)
         assert len(proximal) == 0
-
-def test_annotate_variants(overlapping_features_bed, test_variants):
-    """Test annotating variants with overlapping and proximal features."""
-    with BEDProcessor(overlapping_features_bed) as bed_proc:
-        bed_proc.annotate_variants(test_variants, proximal_span=500)
-        
-        # Check variant 1 (should have overlaps)
-        assert len(test_variants[0].overlapping_features) == 2
-        assert all(f.metadata['name'] in ['feature1', 'feature2'] 
-                  for f in test_variants[0].overlapping_features)
-        
-        # Check variant 2 (should have proximal feature)
-        assert len(test_variants[1].overlapping_features) == 0
-        assert len(test_variants[1].proximal_features) == 1
-        assert test_variants[1].proximal_features[0].metadata['name'] == 'feature2'
-        
-        # Check variant 3 (should have no features)
-        assert len(test_variants[2].overlapping_features) == 0
-        assert len(test_variants[2].proximal_features) == 0 
