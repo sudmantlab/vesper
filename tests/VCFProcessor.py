@@ -6,7 +6,7 @@ import pysam
 from vesper.processors.vcf import VCFProcessor
 from vesper.models.variants import SVType
 
-TEST_DATA_DIR = Path("tests/data")
+TEST_DATA_DIR = Path("tests/test_data")
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_data_dir():

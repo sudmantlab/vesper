@@ -3,36 +3,59 @@ from pathlib import Path
 from typing import Optional
 
 @dataclass
-class Config:
-    """Configuration class for parameters."""
-    # Input/output files
+class RefineConfig:
+    """Configuration for the refine command."""
+    # Required arguments
     vcf_input: Path
-    bam_file: Path
     output_dir: Path
+    bam_file: Path
     
-    # Registry configuration
-    auto_load_registry: bool = True  # Whether to automatically load existing registry if found
-    force_new_registry: bool = False  # Force creation of new registry even if one exists
-    
-    # Parameters
+    # Optional arguments
+    log_dir: Optional[Path] = None  # output_dir/logs if not specified
+    debug: bool = False
     min_support: int = 1
     max_af: float = 0.1
-    
-    # Logging configuration
-    log_dir: Optional[Path] = None
-    debug: bool = False
-    
+    auto_load_registry: bool = True
+    force_new_registry: bool = False
+    test_mode: Optional[int] = None
+
     @classmethod
     def from_args(cls, args):
-        """Create Config instance from parsed command line arguments."""
+        """Create RefineConfig instance from parsed command line arguments."""
         return cls(
             vcf_input=Path(args.vcf),
-            bam_file=Path(args.bam),
             output_dir=Path(args.output_dir),
-            auto_load_registry=args.auto_load_registry == 'True',  # Convert string to bool
-            force_new_registry=args.force_new_registry,
+            bam_file=Path(args.bam),
+            log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
             min_support=args.min_support,
             max_af=args.max_af,
-            log_dir=args.logging,
-            debug=args.debug
+            auto_load_registry=args.auto_load_registry == 'True',
+            force_new_registry=args.force_new_registry == 'True',
+            debug=args.debug,
+            test_mode=args.test_mode
+        )
+
+@dataclass
+class AnnotateConfig:
+    """Configuration for the annotate command."""
+    # Required arguments
+    vcf_input: Path
+    output_dir: Path
+    
+    # Optional arguments
+    log_dir: Optional[Path] = None  # output_dir/logs if not specified
+    debug: bool = False
+    bed_file: Path = Path("annotations/hg38/GRCH38_repeatmasker.bed")
+    test_mode: Optional[int] = None
+
+    @classmethod
+    def from_args(cls, args):
+        """Create AnnotateConfig instance from parsed command line arguments."""
+        return cls(
+            vcf_input=Path(args.vcf),
+            output_dir=Path(args.output_dir),
+            log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
+            bed_file=Path(args.bed),
+            debug=args.debug,
+            test_mode=args.test_mode
         )

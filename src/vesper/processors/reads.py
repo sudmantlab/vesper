@@ -76,7 +76,8 @@ class ReadProcessor:
                 self.logger.error(f"Failed to create BAM index: {e}")
                 raise RuntimeError(f"Failed to create BAM index: {e}")
         
-        self._bam = pysam.AlignmentFile(str(self.bam_path), 'rb')
+        threads = max(1, os.cpu_count() // 2)  # Use 1/2 of available cores for reading BAM
+        self._bam = pysam.AlignmentFile(str(self.bam_path), 'rb', threads=threads)
         self.logger.debug(f"Opened BAM file: {self.bam_path}")
         
         # Load registry if configured

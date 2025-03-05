@@ -12,20 +12,24 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "pysam>=0.21.0",
-    "intervaltree>=3.1.0",
-    "pandas>=2.0.0",
-    "gffutils>=0.12.0",
-    "numpy>=1.24.0",
-    "pydantic>=2.10.6"
+    "pysam==0.23.0",
+    "intervaltree==3.1.0",
+    "pandas==2.2.3",
+    "gffutils==0.13",
+    "numpy==2.2.3",
+    "pydantic==2.10.6",
+    "annotated-types==0.7.0",
+    "pydantic-core==2.27.2",
+    "typing-extensions==4.12.2"
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "black>=23.0.0",
-    "isort>=5.0.0"
+    "pytest==8.3.5",
+    "pytest-cov==6.0.0",
+    "black==25.1.0",
+    "isort==6.0.1",
+    "coverage==7.6.12"
 ]
 
 [project.scripts]

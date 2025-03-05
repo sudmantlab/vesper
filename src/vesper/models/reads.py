@@ -27,6 +27,10 @@ class AlignedRead:
         self.is_supplementary = self._read.is_supplementary
         self.is_secondary = self._read.is_secondary
 
+    @classmethod
+    def from_pysam_read(cls, read: pysam.AlignedSegment) -> 'AlignedRead':
+        return cls(_read=read)
+
     @property
     def sequence(self) -> str:
         return self._read.query_sequence
@@ -74,10 +78,6 @@ class AlignedRead:
     @cached_property
     def cigar_stats(self):
         return self._calculate_cigar_stats(self.cigartuples)
-
-    @classmethod
-    def from_pysam_read(cls, read: pysam.AlignedSegment) -> 'AlignedRead':
-        return cls(_read=read)
 
     @staticmethod
     def _calculate_cigar_stats(cigartuples: List[Tuple[int, int]]) -> Dict[str, int]:

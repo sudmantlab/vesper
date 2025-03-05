@@ -266,3 +266,106 @@ class BEDProcessor(AnnotationProcessor):
         self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
         conn.close()
         return self
+
+class GFFProcessor(AnnotationProcessor):
+    """Implementation of GFF file processor."""
+    def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'GFFProcessor':
+        """Create a new SQLite database from a GFF file if it doesn't already exist.
+        
+        Args:
+            rebuild: If True, rebuild the database even if it exists
+            batch_size: Number of records to insert in each batch
+            
+        Returns:
+            Self for method chaining
+        """
+        if self.db_path is None:
+            self.db_path = self.filepath.with_suffix(self.filepath.suffix + '.sqlite')
+        
+        # Check if database already exists and is valid
+        if not rebuild and self.db_path.exists():
+            try:
+                # Test if we can connect and query
+                conn = sqlite3.connect(str(self.db_path))
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='intervals'")
+                if cursor.fetchone() is not None:
+                    self.logger.info(f"Using existing database: {self.db_path}")
+                    conn.close()
+                    return self
+                conn.close()
+            except sqlite3.Error:
+                self.logger.warning(f"Existing database {self.db_path} appears corrupt, rebuilding...")
+                self.db_path.unlink(missing_ok=True)
+        
+        self.logger.info(f"Building new database from {self.filepath}")
+        conn = sqlite3.connect(str(self.db_path))
+        
+        # Drop existing table if rebuilding
+        conn.execute('DROP TABLE IF EXISTS intervals')
+        
+        conn.execute('''
+            CREATE TABLE intervals (
+                chrom TEXT,
+                start INTEGER,
+                end INTEGER,
+                name TEXT,
+                score REAL,
+                strand TEXT
+            )
+        ''')
+        conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
+        conn.execute('CREATE INDEX idx_chrom_end ON intervals (chrom, end)')
+
+        self.logger.info(f"Indexing {self.filepath}...")
+        batch = []
+
+        with open(self.filepath, 'r') as f:
+            for i, line in enumerate(f):
+                if line.startswith('#') or not line.strip():
+                    continue
+                    
+                fields = line.strip().split('\t')
+                if len(fields) < 9:  # GFF requires 9 fields
+                    continue
+             
+                # GFFs are already 1-based
+                chrom = fields[0].strip()
+                source = fields[1].strip() 
+                feature = fields[2].strip()
+                start = int(fields[3])
+                end = int(fields[4])
+                score = float(fields[5]) if fields[5] != '.' else None
+                strand = fields[6]
+                frame = fields[7]
+
+                # Parse attributes into key-value pairs
+                metadata = {}
+                if fields[8]:
+                    attr_pairs = fields[8].strip().split(';')
+                    for pair in attr_pairs:
+                        if '=' in pair:
+                            key, value = pair.split('=', 1)
+                            metadata[key.strip()] = value.strip()
+                
+                batch.append((chrom, start, end, name, score, strand, frame, metadata))
+                
+                if len(batch) >= batch_size:
+                    conn.executemany(
+                        'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        batch
+                    )
+                    conn.commit()
+                    batch = []
+                    self.logger.info(f"Processed {i+1:,} lines...")
+            
+            # Insert remaining records
+            if batch:
+                conn.executemany(
+                    'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    batch
+                )
+                conn.commit()
+        
+        self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
+        conn.close()
+        return self

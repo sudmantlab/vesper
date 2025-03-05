@@ -5,7 +5,7 @@ import shutil
 from vesper.processors.annotations import BEDProcessor, GenomicInterval
 from vesper.models.variants import Variant, VariantAnalysis, SVType
 
-TEST_DATA_DIR = Path("tests/data")
+TEST_DATA_DIR = Path("tests/test_data")
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_data_dir():

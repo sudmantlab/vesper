@@ -10,8 +10,8 @@ from vesper.processors.reads import ReadProcessor
 from vesper.processors.vcf import VCFProcessor
 from vesper.models.registry import RegistryMetadata
 
-TEST_DATA_DIR = Path("tests/files/hg38/test_data")
 SOURCE_DATA_DIR = Path("tests/files/hg38")
+TEST_DATA_DIR = Path("tests/test_data")
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_data_dir():
