@@ -40,7 +40,16 @@ def parse_args():
     # Main parser
     parser = VesperArgumentParser(
         formatter_class=RawDescriptionRichHelpFormatter,
-        epilog="View inputs & arguments for each command with vesper {command} --help"
+        epilog="""
+    Recommended usage:
+    vesper call (optional + not yet available) → vesper annotate → vesper refine
+
+    - vesper call: provide a FASTQ file of PacBio HiFi reads for alignment and variant calling.
+    - vesper annotate: provide a VCF file of candidate variants to be annotated.
+    - vesper refine: provide a VCF file of annotated candidate variants and the origin BAM file.
+
+    View inputs & arguments for each command with vesper {command} --help.
+        """
     )
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
     

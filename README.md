@@ -4,10 +4,13 @@
 ```
 vesper/
 ├── src/vesper/
-│   ├── models/      # Data models and types
-│   ├── processors/  # File processing and analysis
-│   └── utils/       # Utility functions and config
-├── notebooks/       # Jupyter notebooks for examples and analysis
+│   ├── cli.py
+│   ├── commands/
+│   ├── models/
+│   ├── processors/
+│   └── utils/
+│       └── config.py
+├── notebooks/
 ├── tests/           
 ├── environment.yml  
 ├── requirements.txt 
