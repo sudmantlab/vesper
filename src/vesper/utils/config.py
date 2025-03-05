@@ -3,6 +3,27 @@ from pathlib import Path
 from typing import Optional
 
 @dataclass
+class CallConfig:
+    """Configuration for the call command."""
+    # Required arguments
+    fastq_file: Path
+    output_dir: Path
+    
+    # Optional arguments
+    log_dir: Optional[Path] = None  # output_dir/logs if not specified
+    debug: bool = False
+
+    @classmethod
+    def from_args(cls, args):
+        """Create CallConfig instance from parsed command line arguments."""
+        return cls(
+            fastq_file=Path(args.fastq),
+            output_dir=Path(args.output_dir),
+            log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
+            debug=args.debug
+        )
+
+@dataclass
 class RefineConfig:
     """Configuration for the refine command."""
     # Required arguments
