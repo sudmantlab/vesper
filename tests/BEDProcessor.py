@@ -65,7 +65,7 @@ def test_variants():
         VariantAnalysis(
             variant=Variant(
                 ID="test1",
-                contig="chr1",
+                chrom="chr1",
                 position=2500,  # Should overlap with features
                 sv_type=SVType.DEL,
                 sv_length=100,
@@ -76,7 +76,7 @@ def test_variants():
         VariantAnalysis(
             variant=Variant(
                 ID="test2",
-                contig="chr1",
+                chrom="chr1",
                 position=4500,  # Should be proximal to feature2
                 sv_type=SVType.INS,
                 sv_length=50,
@@ -87,7 +87,7 @@ def test_variants():
         VariantAnalysis(
             variant=Variant(
                 ID="test3",
-                contig="chr2",
+                chrom="chr2",
                 position=5000,  # Should have no overlaps or proximal features
                 sv_type=SVType.DUP,
                 sv_length=200,

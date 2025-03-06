@@ -3,7 +3,7 @@ from typing import List, Optional, ClassVar, Pattern, Dict, Any
 import re
 import numpy as np
 from enum import Enum, auto
-
+import pysam
 import logging
 
 from ..processors.annotations import GenomicInterval
@@ -20,21 +20,27 @@ class SVType(Enum):
 @dataclass(frozen=True)
 class Variant:
     """Immutable representation of a structural variant call from a VCF record."""
-    ID: str
-    contig: str
+    chrom: str
     position: int
+    ID: str
+    ref: str
+    alt: str
+    qual: Optional[float]
+    filter: Optional[str]
+    info: Dict[str, Any]
+    format: str
+    samples: List[Dict[str, Any]]
     sv_type: SVType
     sv_length: int
     DR: int # DR field
     DV: int # DV field, may not match rnames
     rnames: List[str] = field(default_factory=list)
-    quality: int = 0
     
     READ_PATTERN: ClassVar[Pattern] = re.compile(r'([^,;]+)(?:[,;]|$)')
 
     @classmethod
     def from_pysam_record(cls, record) -> "Variant":
-        """Construct variant from pysam VariantRecord object.
+        """Construct Variant object from pysam VariantRecord object.
         
         Args:
             record: pysam.VariantRecord object
@@ -58,16 +64,23 @@ class Variant:
             if 'RNAMES' in record.info:
                 rnames = record.info['RNAMES'][0].split(',')
                 
+            # lead with first 8 required fields
             return cls(
-                ID=record.id,
-                contig=record.chrom,
-                position=record.pos,
-                sv_type=sv_type,
-                sv_length=sv_length,
+                chrom=record.chrom, # equiv #CHROM
+                position=record.pos, # equiv POS
+                ID=record.id, 
+                ref=record.ref,
+                alt=record.alts[0], # assume single ALT
+                qual=record.qual if record.qual is not None else 0,
+                filter=record.filter,
+                info=record.info,
+                format=record.format,
+                samples=record.samples,
+                sv_type=sv_type, # equiv INFO: SVTYPE
+                sv_length=sv_length, # equiv INFO: SVLEN
                 DR=record.samples[0]['DR'],
                 DV=record.samples[0]['DV'],
                 rnames=rnames,
-                quality=record.qual if record.qual is not None else 0
                 )
         except (IndexError, KeyError, ValueError) as e:
             raise ValueError(f"Invalid VCF record: {str(e)}")
@@ -79,7 +92,7 @@ class Variant:
             raise ValueError("sv_length must be non-negative")
             
     def __repr__(self) -> str:
-        return f"Variant(contig={self.contig}, pos={self.position}, type={self.sv_type.name}, len={self.sv_length}, DR={self.DR}, DV={self.DV})"
+        return f"Variant(chrom={self.chrom}, pos={self.position}, type={self.sv_type.name}, len={self.sv_length}, DR={self.DR}, DV={self.DV})"
 
 @dataclass
 class VariantAnalysis:
@@ -141,18 +154,84 @@ class VariantAnalysis:
             self.confidence = 0.0
             return
             
-        # Calculate mapq differential between support and nonsupport reads
-        mapq_diff = self.metrics['comparison']['mapq_mean'] - self.metrics['comparison']['mapq_mean_other']
+        # Calculate mapq diff between support and nonsupport reads as a ratio between support and nonsupport
+        # Under the assumption that support reads may have worse alignment quality
+        mapq_ratio = max(1, self.metrics['comparison']['mapq_mean'] / self.metrics['comparison']['mapq_mean_other'])
         
-        # Calculate softclip differential between support and nonsupport reads
+        # Calculate softclip diff between support and nonsupport reads as a ratio between support and nonsupport
+        # Under the same assumption as above
         support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
         nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
-        softclip_diff = support_pct - nonsupport_pct
+        softclip_ratio = max(1, support_pct / nonsupport_pct)
         
-        # scaling
-        mapq_factor = min(max(mapq_diff / 60.0, 0), 1)  # max mapq of 60
-        softclip_factor = min(max(-softclip_diff / 50.0, 0), 1)  # less softclipping is better
+        # TODO: smarter weighting
+        mapq_weight, softclip_weight = 0.3, 0.7
+        weighted_score = (mapq_ratio ** mapq_weight) + (softclip_ratio ** softclip_weight)
+        self.confidence = weighted_score
         
-        # TODO: fix weighting
-        self.confidence = (mapq_factor * 0.7) + (softclip_factor * 0.3)
-    
+    def to_vcf_record(self) -> pysam.VariantRecord:
+        """Convert VariantAnalysis to a pysam.VariantRecord object.
+        
+        """
+        """Convert VariantAnalysis to a VCF line string.
+        
+        Returns:
+            String representation of the variant in VCF format
+        """
+        chrom = self.variant.chrom
+        pos = str(self.variant.position)
+        id_field = self.variant.ID
+        ref = self.variant.ref
+        alt = self.variant.alt
+        
+        # Format QUAL and FILTER fields
+        qual = str(self.variant.qual) if self.variant.qual is not None else "."
+        filter_field = self.variant.filter
+        
+        # Build INFO field
+        info = []
+        info.append(f"SVTYPE={self.variant.sv_type.name}")
+        info.append(f"SVLEN={self.variant.sv_length}")
+        
+        if self.variant.rnames:
+            rnames_str = ",".join(self.variant.rnames)
+            info.append(f"RNAMES={rnames_str}")
+            
+        info.append(f"CONFIDENCE={self.confidence:.2f}")
+        
+        # Add read group metrics to INFO field if available
+        if self.metrics and 'comparison' in self.metrics:
+            info.append(f"RMAPQ={self.metrics['comparison']['mapq_mean']:.0f}")
+            info.append(f"NSMAPQ={self.metrics['comparison']['mapq_mean_other']:.0f}")
+            info.append(f"RSFTCLIP={self.metrics['comparison']['softclip_stats']['pct_softclipped']:.1f}")
+            info.append(f"NSFTCLIP={self.metrics['comparison']['softclip_stats_other']['pct_softclipped']:.1f}")
+        
+        # Add annotations to INFO field if available
+        if self.overlapping_features:
+            overlapping = []
+            for key, interval in self.overlapping_features.items():
+                if isinstance(interval, GenomicInterval):
+                    flattened = interval.to_dict()
+                    overlapping.append(str(flattened))
+            if overlapping:
+                info.append(f"OVERLAPPING={','.join(overlapping)}")
+
+        if self.proximal_features:
+            proximal = []
+            for key, interval in self.proximal_features.items():
+                if isinstance(interval, GenomicInterval):
+                    flattened = interval.to_dict()
+                    proximal.append(str(flattened))
+            if proximal:
+                info.append(f"PROXIMAL={','.join(proximal)}")
+                
+        info_field = ";".join(info)
+        
+        # Format FORMAT and sample fields
+        format_field = "DR:DV"
+        sample_field = f"{self.variant.DR}:{self.variant.DV}"
+        
+        # Combine all fields into a VCF record
+        vcf_record = "\t".join([chrom, pos, id_field, ref, alt, qual, filter_field, info_field, format_field, sample_field])
+        
+        return vcf_record

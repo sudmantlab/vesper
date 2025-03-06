@@ -119,10 +119,10 @@ class ReadProcessor:
             
         # Determine region to fetch
         start = max(0, variant.position - self.window_size)
-        end = min(self._bam.get_reference_length(variant.contig), variant.position + self.window_size)
+        end = min(self._bam.get_reference_length(variant.chrom), variant.position + self.window_size)
         
         # Get all reads in the region
-        all_reads = list(self._bam.fetch(variant.contig, start, end))
+        all_reads = list(self._bam.fetch(variant.chrom, start, end))
         
         # Set of supporting read names from variant
         supporting_names = set(variant.rnames)
@@ -245,7 +245,7 @@ class ReadProcessor:
             read_metadata = {}
             for name, read in self._read_registry.items():
                 read_model = ReadMetadata(
-                    contig=read.contig,
+                    chrom=read.chrom,
                     start=read.start,
                     end=read.end,
                     mapq=read.mapq,
@@ -318,7 +318,7 @@ class ReadProcessor:
                         continue
                         
                     # Find and wrap the read
-                    for read in self._bam.fetch(validated_metadata.contig, 
+                    for read in self._bam.fetch(validated_metadata.chrom, 
                                               validated_metadata.start, 
                                               validated_metadata.end):
                         if read.query_name == read_name:

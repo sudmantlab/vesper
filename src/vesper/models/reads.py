@@ -12,7 +12,7 @@ class AlignedRead:
 
     # eagerly loaded attributes
     name: str = field(init=False)
-    contig: str = field(init=False)
+    chrom: str = field(init=False)
     start: int = field(init=False)
     end: int = field(init=False)
     is_supplementary: bool = field(init=False)
@@ -21,7 +21,7 @@ class AlignedRead:
     def __post_init__(self):
         # load minimal properties we always need
         self.name = self._read.query_name
-        self.contig = self._read.reference_name
+        self.chrom = self._read.reference_name
         self.start = self._read.reference_start
         self.end = self._read.reference_end
         self.is_supplementary = self._read.is_supplementary

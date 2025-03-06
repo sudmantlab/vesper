@@ -5,7 +5,7 @@ from enum import Enum
 
 class ReadMetadata(BaseModel):
     """Metadata about an AlignedRead stored in the read metadata registry."""
-    contig: str
+    chrom: str
     start: int
     end: int
     mapq: int

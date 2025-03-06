@@ -25,6 +25,19 @@ class GenomicInterval:
     @property
     def length(self) -> int:
         return self.end - self.start
+    
+    def to_dict(self) -> dict:
+        """Convert interval to a flattened dictionary."""
+        result = {
+            'chrom': self.chrom,
+            'start': self.start,
+            'end': self.end,
+            'length': self.length
+        }
+
+        if self.metadata:
+            result.update(self.metadata)      
+        return result
 
 class AnnotationProcessor(ABC):
     """Base class for processing genomic annotation files."""
@@ -153,13 +166,13 @@ class AnnotationProcessor(ABC):
     def _annotate_variant(self, variant, proximal_span) -> None:
         """Annotate a single variant."""
         overlaps = self.find_overlaps(
-            variant.variant.contig,
+            variant.variant.chrom,
             variant.variant.position
         )
         variant.overlapping_features.extend(overlaps)
         
         proximal = self.find_proximal(
-            variant.variant.contig,
+            variant.variant.chrom,
             variant.variant.position,
             proximal_span
         )

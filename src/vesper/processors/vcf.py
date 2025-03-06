@@ -1,15 +1,20 @@
 from dataclasses import dataclass
-from typing import Iterator, Tuple, Optional
+from typing import Iterator, Tuple, Optional, List, TextIO
 import pysam
 from pathlib import Path
 import logging
+from datetime import datetime
+from io import StringIO
+import gzip
+import tempfile
+import os
 
 from ..models.variants import Variant, SVType, VariantAnalysis
 from ..models.reads import ReadGroup, AlignedRead
 
 
 class VCFProcessor:
-    """Handles reading and writing VCF files."""
+    """Handles reading VCF files and creating Variant + VariantAnalysis objects."""
     
     def __init__(self, vcf_path: Path, test_mode: Optional[int] = None):
         self.vcf_path = vcf_path
@@ -68,36 +73,190 @@ class VCFProcessor:
                 yield analysis
             except Exception as e:
                 raise type(e)(f"Invalid variant record: {str(e)}") from e
+
+class VCFWriter:
+    """Handles writing VCF files from VariantAnalysis objects."""
     
-    @staticmethod
-    def create_vcf(output_path: Path, template_vcf: Optional[Path] = None) -> pysam.VariantFile:
-        """Create a new VCF file, optionally copying header from template.
+    def __init__(self, output_path: Path, compress: bool = True):
+        """Initialize a VCF writer.
         
         Args:
             output_path: Path to create new VCF
+            compress: Whether to bgzip compress output VCF (default True)
+        """
+        self.output_path = output_path
+        self.compress = compress
+        self.file = None
+        
+        if compress:
+            if not str(output_path).endswith('.gz'):
+                raise ValueError("Output path must end with .gz for compressed VCF files!")
+            else:
+                self.output_path = output_path
+            self.temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.vcf')
+            self.temp_path = Path(self.temp_file.name)
+        else:
+            self.temp_file = None
+            self.temp_path = None
+    
+    def __enter__(self):
+        """Open the VCF file for writing."""
+        if self.compress:
+            # Open the temporary file for writing
+            self.file = self.temp_file
+        else:
+            # Open the output file directly
+            self.file = open(self.output_path, 'w')
+        
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close the VCF file."""
+        if self.file:
+            self.file.close()
+            
+        if self.compress and self.temp_path:
+            pysam.tabix_compress(str(self.temp_path), str(self.output_path), force=True) # force overwrite
+            os.unlink(self.temp_path)
+    
+    def create_header(self, variants: List[VariantAnalysis], template_vcf: Optional[Path] = None) -> str:
+        """Create a VCF header string, optionally copying from a template (i.e. input VCF).
+        
+        Args:
+            variants: List of Variant objects to derive contig information from
             template_vcf: Optional path to VCF to copy header from
-            TODO: Default use input VCF header
             
         Returns:
-            pysam.VariantFile opened for writing
+            String representation of the VCF header
         """
-        mode = 'w' if str(output_path).endswith('.vcf') else 'wz'  # Compressed if .gz
+        buffer = StringIO()
         
         if template_vcf:
-            # Copy header from template
-            with pysam.VariantFile(str(template_vcf)) as vcf:
-                header = vcf.header
+            # Read header lines from template VCF
+            # Check if the file is gzipped
+            is_gzipped = str(template_vcf).endswith('.gz')
+            
+            # Open with appropriate opener
+            opener = gzip.open if is_gzipped else open
+            with opener(template_vcf, 'rt') as f:
+                for line in f:
+                    if line.startswith('#'):
+                        self.write_line(buffer, line.strip())
+                    else:
+                        break
         else:
-            # Create minimal header
-            # TODO: This needs to be updated with dependent annotation information per variant
-            header = pysam.VariantHeader()
-            header.add_line('##fileformat=VCFv4.2')
-            header.add_line('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">')
-            header.add_line('##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length of structural variant">')
-            header.add_line('##INFO=<ID=RNAMES,Number=.,Type=String,Description="Supporting read names">')
+            # Create a new header
+            contigs = set(v.variant.chrom for v in variants)
+
+            # Required VCF header fields
+            self.write_header_line(buffer, "fileformat=VCFv4.2")
+            self.write_header_line(buffer, "fileDate=" + datetime.now().strftime("%Y%m%d"))
+            self.write_header_line(buffer, "source=vesper")
             
-            # Add required fields
-            header.add_line('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">')
-            header.contigs.add('1')  # Minimal contig
+            # Add reference placeholder - required for proper indexing
+            self.write_header_line(buffer, "reference=file:///seq/references/placeholder.fasta")
             
-        return pysam.VariantFile(str(output_path), mode, header=header)
+            # Add contigs with proper format
+            for contig in contigs:
+                # TODO: Get real lengths of the contigs from the reference/BAM file!
+                self.write_header_line(buffer, f"contig=<ID={contig},length=10000000>")
+            
+            # Add FILTER definitions
+            self.write_header_line(buffer, "FILTER=<ID=PASS,Description=\"All filters passed\">")  
+            self.write_header_line(buffer, "FILTER=<ID=HSD,Description=\"High identity segmental duplication overlap\">")
+            self.write_header_line(buffer, "FILTER=<ID=CEN,Description=\"Centromere overlap\">")
+            self.write_header_line(buffer, "FILTER=<ID=REP,Description=\"High identity RepeatMasker overlap/proximal feature\">")
+            
+            # Add INFO field definitions
+            self.write_header_line(buffer, "INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">")
+            self.write_header_line(buffer, "INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of structural variant\">")
+            self.write_header_line(buffer, "INFO=<ID=RNAMES,Number=.,Type=String,Description=\"Supporting read names\">")
+            self.write_header_line(buffer, "INFO=<ID=RMAPQ,Number=1,Type=Integer,Description=\"Supporting read mapping qualities\">")
+            self.write_header_line(buffer, "INFO=<ID=RSFTCLIP,Number=1,Type=Float,Description=\"Supporting read soft-clipping stats\">")
+            self.write_header_line(buffer, "INFO=<ID=NSMAPQ,Number=1,Type=Float,Description=\"Nonsupporting read mapping qualities\">")
+            self.write_header_line(buffer, "INFO=<ID=NSFTCLIP,Number=1,Type=Float,Description=\"Nonsupporting read soft-clipping stats\">")
+            self.write_header_line(buffer, "INFO=<ID=CONFIDENCE,Number=1,Type=Float,Description=\"Confidence score for the variant\">")
+            self.write_header_line(buffer, "INFO=<ID=OVERLAPPING,Number=.,Type=String,Description=\"Overlapping annotated features\">")
+            self.write_header_line(buffer, "INFO=<ID=PROXIMAL,Number=.,Type=String,Description=\"Proximal annotated features\">")
+            
+            # Add FORMAT field definitions
+            self.write_header_line(buffer, "FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference-supporting reads\">")
+            self.write_header_line(buffer, "FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant-supporting reads\">")
+            
+            # Add the column header line - must be tab-separated
+            self.write_line(buffer, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE")
+        
+        return buffer.getvalue().rstrip()
+    
+    def write_header(self, variants: List[VariantAnalysis], template_vcf: Optional[Path] = None) -> None:
+        """Write the VCF header to the file.
+        
+        Args:
+            variants: List of Variant objects to derive contig information from
+            template_vcf: Optional path to VCF to copy header from
+        """
+        if not self.file:
+            raise RuntimeError("VCF file not opened. Use with-statement to open file.")
+            
+        header = self.create_header(variants, template_vcf)
+        for line in header.split('\n'):
+            self.write_line(self.file, line)
+    
+    def write_line(self, file: TextIO, line: str) -> None:
+        """Write any line to a VCF file.
+        
+        Args:
+            file: Open file object for writing
+            line: Line to write
+        """
+        file.write(line + "\n")
+    
+    def write_header_line(self, file: TextIO, line: str) -> None:
+        """Convenience function to write a header line to a VCF file.
+        
+        Args:
+            file: Open file object for writing
+            line: Header line content (without the ## prefix)
+        """
+        if not line.startswith("#"):
+            line = "##" + line
+        self.write_line(file, line)
+
+    def write_record(self, variant: VariantAnalysis) -> None:
+        """Write a single VariantAnalysis object to the VCF file.
+        
+        Args:
+            variant: VariantAnalysis object to write
+        """
+        if not self.file:
+            raise RuntimeError("VCF file not opened. Use with-statement to open file.")
+            
+        vcf_record = variant.to_vcf_record()
+        self.write_line(self.file, vcf_record)
+    
+    def write_records(self, variants: List[VariantAnalysis], template_vcf: Optional[Path] = None) -> None:
+        """Write a list of VariantAnalysis objects to the VCF file.
+        
+        Args:
+            variants: List of VariantAnalysis objects to write
+            template_vcf: Optional path to VCF to copy header from
+        """
+        if not self.file:
+            raise RuntimeError("VCF file not opened. Use with-statement to open file.")
+            
+        for variant in variants:
+            self.write_record(variant)
+    
+    @staticmethod
+    def create_tabix_index(vcf_path: Path) -> None:
+        """Create a tabix index for a VCF file.
+        
+        Args:
+            vcf_path: Path to the VCF file to index (must be bgzipped)
+        """
+        # Check if the file is bgzipped
+        if not str(vcf_path).endswith('.gz'):
+            raise ValueError("VCF file must be bgzipped to create a tabix index!")
+            
+        # Create the index
+        pysam.tabix_index(str(vcf_path), preset="vcf", force=True)
