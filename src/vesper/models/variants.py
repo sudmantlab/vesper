@@ -47,8 +47,12 @@ class Variant:
         
         Returns:
             Variant
+            
+        Raises:
+            ValueError: If record is invalid or missing required fields
         """
         try:
+            # Handle SVTYPE
             try:
                 sv_type = SVType[record.info['SVTYPE']]
             except KeyError:
@@ -62,27 +66,59 @@ class Variant:
             # Get supporting read names if present
             rnames = []
             if 'RNAMES' in record.info:
-                rnames = record.info['RNAMES'][0].split(',')
-                
-            # lead with first 8 required fields
+                rnames = str(record.info['RNAMES'][0]).split(',')
+            
+            # Convert filter field to string
+            if record.filter is None:
+                filter_str = "PASS"
+            else:
+                # pysam filters are a set of strings or special filter objects
+                filter_list = []
+                for f in record.filter:
+                    if hasattr(f, 'name'):  # pysam filter object
+                        filter_list.append(str(f.name))
+                    else:  # string
+                        filter_list.append(str(f))
+                filter_str = ";".join(filter_list) if filter_list else "PASS"
+            
+            # Convert info dict values to basic Python types
+            info_dict = {}
+            for key, value in record.info.items():
+                if isinstance(value, tuple):
+                    # Some pysam info fields come as tuples
+                    info_dict[key] = list(value)
+                else:
+                    info_dict[key] = value
+            
+            # Convert sample data to basic Python types
+            sample_dicts = []
+            for sample in record.samples.values():
+                sample_dict = {}
+                for key, value in sample.items():
+                    if isinstance(value, tuple):
+                        sample_dict[key] = list(value)
+                    else:
+                        sample_dict[key] = value
+                sample_dicts.append(sample_dict)
+            
             return cls(
-                chrom=record.chrom, # equiv #CHROM
-                position=record.pos, # equiv POS
-                ID=record.id, 
-                ref=record.ref,
-                alt=record.alts[0], # assume single ALT
-                qual=record.qual if record.qual is not None else 0,
-                filter=record.filter,
-                info=record.info,
-                format=record.format,
-                samples=record.samples,
-                sv_type=sv_type, # equiv INFO: SVTYPE
-                sv_length=sv_length, # equiv INFO: SVLEN
-                DR=record.samples[0]['DR'],
-                DV=record.samples[0]['DV'],
+                chrom=str(record.chrom),
+                position=int(record.pos),
+                ID=str(record.id if record.id is not None else "."),
+                ref=str(record.ref),
+                alt=str(record.alts[0]),  # assume single ALT
+                qual=float(record.qual) if record.qual is not None else 0.0,
+                filter=filter_str,
+                info=info_dict,
+                format=str(record.format),
+                samples=sample_dicts,
+                sv_type=sv_type,
+                sv_length=int(sv_length),
+                DR=int(record.samples[0]['DR']),
+                DV=int(record.samples[0]['DV']),
                 rnames=rnames,
-                )
-        except (IndexError, KeyError, ValueError) as e:
+            )
+        except (IndexError, KeyError, ValueError, TypeError) as e:
             raise ValueError(f"Invalid VCF record: {str(e)}")
 
     def __post_init__(self):
@@ -103,7 +139,7 @@ class VariantAnalysis:
     metrics: Dict[str, Any] = field(default_factory=dict)
     overlapping_features: List[GenomicInterval] = field(default_factory=list)
     proximal_features: List[GenomicInterval] = field(default_factory=list)
-    confidence: float = 0.0
+    confidence: Optional[float] = None
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
     def __repr__(self) -> str:
@@ -111,18 +147,6 @@ class VariantAnalysis:
                 f"nonsupport_reads={len(self.nonsupport_reads)},\n"
                 f"overlapping_features={len(self.overlapping_features)},\n"
                 f"proximal_features={len(self.proximal_features)}")
-
-    # This method is no longer used - reads are directly assigned in ReadProcessor.process_variants
-    # Keeping for backwards compatibility
-    def _add_read_groups(self, processor) -> None:
-        """Add supporting and non-supporting read groups.
-        
-        Args:
-            processor: ReadProcessor instance
-        """
-        support_reads, nonsupport_reads = processor.get_read_groups(self.variant)
-        self.support_reads = support_reads
-        self.nonsupport_reads = nonsupport_reads
     
     def _calculate_grouped_metrics(self) -> None:
         """Calculate metrics based on read groups."""
@@ -130,19 +154,15 @@ class VariantAnalysis:
             self.logger.warning(f"Missing reads for variant {self.variant.ID}, skipping metrics calculation")
             return
 
-        # Get basic read counts
         self.metrics['n_support'] = len(self.support_reads)
         self.metrics['n_nonsupport'] = len(self.nonsupport_reads)
         
-        # Get read quality metrics
         self.metrics['support_mapq'] = self.support_reads.mean_mapq
         self.metrics['nonsupport_mapq'] = self.nonsupport_reads.mean_mapq
         
-        # Get soft-clipping metrics
         self.metrics['support_softclip'] = self.support_reads.soft_clip_stats
         self.metrics['nonsupport_softclip'] = self.nonsupport_reads.soft_clip_stats
 
-        # Comparison metrics
         self.metrics['comparison'] = self.support_reads.compare_stats(self.nonsupport_reads)
             
     def _calculate_confidence(self) -> None:
@@ -165,14 +185,10 @@ class VariantAnalysis:
         softclip_ratio = max(1, support_pct / nonsupport_pct)
         
         # TODO: smarter weighting
-        mapq_weight, softclip_weight = 0.3, 0.7
-        weighted_score = (mapq_ratio ** mapq_weight) + (softclip_ratio ** softclip_weight)
-        self.confidence = weighted_score
+        weighted_score = max(0, mapq_ratio * (1/softclip_ratio))
+        self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
         
-    def to_vcf_record(self) -> pysam.VariantRecord:
-        """Convert VariantAnalysis to a pysam.VariantRecord object.
-        
-        """
+    def to_vcf_record(self) -> str:
         """Convert VariantAnalysis to a VCF line string.
         
         Returns:
@@ -184,11 +200,10 @@ class VariantAnalysis:
         ref = self.variant.ref
         alt = self.variant.alt
         
-        # Format QUAL and FILTER fields
         qual = str(self.variant.qual) if self.variant.qual is not None else "."
         filter_field = self.variant.filter
         
-        # Build INFO field
+        # Start building INFO field
         info = []
         info.append(f"SVTYPE={self.variant.sv_type.name}")
         info.append(f"SVLEN={self.variant.sv_length}")
@@ -197,7 +212,9 @@ class VariantAnalysis:
             rnames_str = ",".join(self.variant.rnames)
             info.append(f"RNAMES={rnames_str}")
             
-        info.append(f"CONFIDENCE={self.confidence:.2f}")
+        # Only add confidence if it has been calculated
+        if self.confidence is not None:
+            info.append(f"CONFIDENCE={self.confidence:.2f}")
         
         # Add read group metrics to INFO field if available
         if self.metrics and 'comparison' in self.metrics:
@@ -209,7 +226,7 @@ class VariantAnalysis:
         # Add annotations to INFO field if available
         if self.overlapping_features:
             overlapping = []
-            for key, interval in self.overlapping_features.items():
+            for interval in self.overlapping_features:
                 if isinstance(interval, GenomicInterval):
                     flattened = interval.to_dict()
                     overlapping.append(str(flattened))
@@ -218,20 +235,18 @@ class VariantAnalysis:
 
         if self.proximal_features:
             proximal = []
-            for key, interval in self.proximal_features.items():
+            for interval in self.proximal_features:
                 if isinstance(interval, GenomicInterval):
                     flattened = interval.to_dict()
                     proximal.append(str(flattened))
             if proximal:
                 info.append(f"PROXIMAL={','.join(proximal)}")
                 
-        info_field = ";".join(info)
-        
-        # Format FORMAT and sample fields
+        info_field = ";".join(info) 
+    
         format_field = "DR:DV"
         sample_field = f"{self.variant.DR}:{self.variant.DV}"
         
-        # Combine all fields into a VCF record
         vcf_record = "\t".join([chrom, pos, id_field, ref, alt, qual, filter_field, info_field, format_field, sample_field])
         
         return vcf_record

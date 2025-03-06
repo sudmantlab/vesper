@@ -145,6 +145,7 @@ def test_find_overlaps(overlapping_features_bed):
         # Query position with multiple overlaps
         overlaps = bed_proc.find_overlaps('chr1', 2750)
         assert len(overlaps) == 3
+        print(overlaps)
         
         # Check returned objects
         for feature in overlaps:

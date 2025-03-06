@@ -17,14 +17,6 @@ def display_ascii():
         \033[3ma haplotype-aware de novo structural variant caller\033[0m
         """)
 
-
-def add_common_args(parser):
-    """Add arguments common to all commands."""
-    parser.add_argument("--output-dir", "-o", required=True, help="Output directory (required)")
-    parser.add_argument("--logging", help="Log directory (default: output/logs)")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--console-output", action="store_true", help="Enable logging to console (default: False)")
-
 class VesperArgumentParser(argparse.ArgumentParser):
     """Custom argument parser that shows program-specific help on error."""
     
@@ -34,7 +26,6 @@ class VesperArgumentParser(argparse.ArgumentParser):
         self.print_help()
         self.exit(2, f'\n\033[31mERROR\033[0m: {message}\n')
 
-# Main parser
 def parse_args():
     """Parse command line arguments."""
     parser = VesperArgumentParser(
@@ -62,9 +53,16 @@ Example:
   vesper call --fastq input.fastq --output-dir output/
         """
         )
-    add_common_args(call_parser)
     call_parser.add_argument("--fastq", "-f", required=True,
-                                help="fastq/fastq.gz file for alignment (required)")
+                            help="fastq/fastq.gz file for alignment (required)")
+    call_parser.add_argument("--output-dir", "-o", required=True,
+                            help="Output directory (required)")
+    call_parser.add_argument("--logging",
+                            help="Log directory (default: output/logs)")
+    call_parser.add_argument("--debug", action="store_true",
+                            help="Enable debug logging")
+    call_parser.add_argument("--console-output", action="store_true",
+                            help="Enable logging to console (default: False)")
 
     # vesper annotate
     annotate_parser = subparsers.add_parser('annotate',
@@ -77,12 +75,22 @@ Example:
   vesper annotate --vcf input.vcf --output-dir output/ --test-mode 50
         """
         )
-    add_common_args(annotate_parser)
-    annotate_parser.add_argument("--vcf", "-v", required=True, help="Input VCF file (required)")
+    annotate_parser.add_argument("--vcf", "-v", required=True,
+                                help="Input VCF file (required)")
     annotate_parser.add_argument("--bed", "-b", default="annotations/hg38/GRCH38_repeatmasker.bed",
                                 help="BED file for annotations (default: annotations/hg38/GRCH38_repeatmasker.bed)")
+    annotate_parser.add_argument("--output-dir", "-o", required=True,
+                                help="Output directory (required)")
+    annotate_parser.add_argument("--proximal-span", type=int, default=100,
+                                help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,
-                              help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
+                                help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
+    annotate_parser.add_argument("--logging",
+                                help="Log directory (default: output/logs)")
+    annotate_parser.add_argument("--debug", action="store_true",
+                                help="Enable debug logging")
+    annotate_parser.add_argument("--console-output", action="store_true",
+                                help="Enable logging to console (default: False)")
     
     # vesper refine
     refine_parser = subparsers.add_parser('refine', 
@@ -94,9 +102,12 @@ Example:
   vesper refine --vcf input.vcf --bam input.bam --output-dir output/
   vesper refine --vcf input.vcf --bam input.bam --output-dir output/ --test-mode 50
         """)
-    add_common_args(refine_parser)
-    refine_parser.add_argument("--vcf", "-v", required=True, help="Input VCF file (required)")
-    refine_parser.add_argument("--bam", "-b", required=True, help="Input BAM file (required)")
+    refine_parser.add_argument("--vcf", "-v", required=True,
+                              help="Input VCF file (required)")
+    refine_parser.add_argument("--bam", "-b", required=True,
+                              help="Input BAM file (required)")
+    refine_parser.add_argument("--output-dir", "-o", required=True,
+                              help="Output directory (required)")
     refine_parser.add_argument("--min-support", type=int, default=1,
                               help="Minimum supporting reads (default: 1)")
     refine_parser.add_argument("--max-af", type=float, default=0.1,
@@ -105,8 +116,14 @@ Example:
                               help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     refine_parser.add_argument("--auto-load-registry", choices=['True', 'False'], default='True',
                               help="Whether to automatically load existing registry if found (default: True)")
-    refine_parser.add_argument("--force-new-registry", choices=['True', 'False'], default='False',
-                              help="Forces creation of new registry even if one exists (default: False)")
+    refine_parser.add_argument("--force-new-registry", action="store_true",
+                              help="Forces rebuilding of registry even if one exists.")
+    refine_parser.add_argument("--logging",
+                              help="Log directory (default: output/logs)")
+    refine_parser.add_argument("--debug", action="store_true",
+                              help="Enable debug logging")
+    refine_parser.add_argument("--console-output", action="store_true",
+                              help="Enable logging to console (default: False)")
 
     args, _ = parser.parse_known_args()
     if args.command is None:

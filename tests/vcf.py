@@ -185,12 +185,8 @@ def mock_variant_analysis_1(mock_variant_1):
             'cigar_stats_other': {'M': 1200, 'S': 100}
         }
     }
-    analysis.overlapping_features = {
-        "('chr1', 900, 1100)": GenomicInterval(chrom="chr1", start=900, end=1100, metadata={'name': "AluSx"})
-    }
-    analysis.proximal_features = {
-        "('chr1', 1200, 1500)": GenomicInterval(chrom="chr1", start=1200, end=1500, metadata={'name': "AluYb8"})
-    }
+    analysis.overlapping_features = [GenomicInterval(chrom="chr1", start=900, end=1100, metadata={'name': "AluSx"})]
+    analysis.proximal_features = [GenomicInterval(chrom="chr1", start=1200, end=1500, metadata={'name': "AluYb8"})]
     return analysis
 
 @pytest.fixture
@@ -210,12 +206,8 @@ def mock_variant_analysis_2(mock_variant_2):
             'cigar_stats_other': {'M': 1400, 'S': 80}
         }
     }
-    analysis.overlapping_features = {
-        "('chr2', 1900, 2100)": GenomicInterval(chrom="chr2", start=1900, end=2100, metadata={'name': "L1PA3"})
-    }
-    analysis.proximal_features = {
-        "('chr2', 2200, 2400)": GenomicInterval(chrom="chr2", start=2200, end=2400, metadata={'name': "AluY"})
-    }
+    analysis.overlapping_features = [GenomicInterval(chrom="chr2", start=1900, end=2100, metadata={'name': "L1PA3"})]
+    analysis.proximal_features = [GenomicInterval(chrom="chr2", start=2200, end=2400, metadata={'name': "AluY"})]
     return analysis
 
 # VCF reading
@@ -373,7 +365,8 @@ def test_write_records(mock_variant_analysis_1, mock_variant_analysis_2):
     variants = [mock_variant_analysis_1, mock_variant_analysis_2]
     with VCFWriter(output_path, compress=False) as writer:
         writer.write_header(variants)
-        writer.write_records(variants)
+        for variant in variants:
+            writer.write_record(variant)
 
     assert output_path.exists()
     
@@ -416,7 +409,8 @@ def test_write_compressed_vcf(mock_variant_analysis_1, mock_variant_analysis_2):
     variants = [mock_variant_analysis_1, mock_variant_analysis_2]
     with VCFWriter(output_path, compress=True) as writer:
         writer.write_header(variants)
-        writer.write_records(variants)
+        for variant in variants:
+            writer.write_record(variant)
 
     assert output_path.exists()
 

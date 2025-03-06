@@ -8,7 +8,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
-from vesper.processors.vcf import VCFProcessor
+from vesper.processors.vcf import VCFProcessor, VCFWriter
 from vesper.processors.reads import ReadProcessor
 from vesper.utils.config import RefineConfig
 
@@ -102,10 +102,65 @@ def run_refine(args, logger):
         elapsed = time.time() - start_time
         logger.info(f"Completed refinement in {elapsed:.2f} seconds")
 
-        confident_variants = [v for v in variants if v.confidence > 0.6]
-        logger.info(f"Found {len(confident_variants)} high-confidence variants")
-        logger.info(f"Mean confidence score: {sum(v.confidence for v in variants)/len(variants):.3f}") 
+        # Calculate confidence score statistics
+        confidence_scores = [v.confidence for v in variants if v.confidence is not None]
+        if confidence_scores:
+            mean_conf = sum(confidence_scores) / len(confidence_scores)
+            min_conf = min(confidence_scores)
+            max_conf = max(confidence_scores)
+            median_conf = sorted(confidence_scores)[len(confidence_scores)//2]
+            
+            confident_variants = [v for v in variants if v.confidence and v.confidence > 0.6]
+            pct_confident = len(confident_variants) / len(variants) * 100
+            
+            logger.info(f"Confidence score statistics:")
+            logger.info(f"    Mean: {mean_conf:.3f}")
+            logger.info(f"    Median: {median_conf:.3f}") 
+            logger.info(f"    Min: {min_conf:.3f}")
+            logger.info(f"    Max: {max_conf:.3f}")
+            logger.info(f"    High-confidence variants: {len(confident_variants)} ({pct_confident:.1f}%)")
+        else:
+            logger.warning("WARNING: No confidence scores calculated!")
+            print(f"{timestamp} - WARNING: No confidence scores calculated!")
 
     print(f"{timestamp} - Completed refinement in {elapsed:.2f} seconds")
-    print(f"{timestamp} - Found {len(confident_variants)} high-confidence variants")
-    print(f"{timestamp} - Mean confidence score: {sum(v.confidence for v in variants)/len(variants):.3f}") 
+    print(f"{timestamp} - Confidence score statistics:")
+    print(f"    Mean: {mean_conf:.3f}")
+    print(f"    Median: {median_conf:.3f}")
+    print(f"    Min: {min_conf:.3f}")
+    print(f"    Max: {max_conf:.3f}")
+    print(f"    High-confidence variants: {len(confident_variants)} ({pct_confident:.1f}%)")
+
+    # Write refined variants to output VCF file
+    output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.refined.vcf.gz')
+    logger.info(f"Writing refined variants to {output_vcf_path}")
+    print(f"{timestamp} - Writing refined variants to {output_vcf_path}")
+    
+    start_write_time = time.time()
+    with Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(complete_style="green"), 
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn()
+    ) as progress, VCFWriter(output_vcf_path) as vcf_writer:
+        
+        task = progress.add_task("[cyan]Writing refined variants...", total=len(variants))
+        vcf_writer.write_header(variants)
+        
+        for i, variant in enumerate(variants):
+            vcf_writer.write_record(variant)
+            progress.update(task, advance=1)
+            
+            if (i + 1) % 1000 == 0:
+                logger.info(f"Wrote {i + 1}/{len(variants)} variants")
+    
+    write_elapsed = time.time() - start_write_time
+    logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")
+    
+    # Create tabix index for the output VCF
+    logger.info(f"Creating tabix index for {output_vcf_path}")
+    VCFWriter.create_tabix_index(output_vcf_path)
+    
+    logger.info(f"Refinement pipeline completed successfully")
+    print(f"{timestamp} - Refinement pipeline completed successfully") 

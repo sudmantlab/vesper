@@ -22,6 +22,9 @@ class GenomicInterval:
         if self.metadata is None:
             self.metadata = {}
 
+    def __repr__(self) -> str:
+        return f"GenomicInterval(chrom={self.chrom}, start={self.start}, end={self.end}, metadata={self.metadata})"
+
     @property
     def length(self) -> int:
         return self.end - self.start

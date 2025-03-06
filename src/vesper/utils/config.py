@@ -51,7 +51,7 @@ class RefineConfig:
             min_support=args.min_support,
             max_af=args.max_af,
             auto_load_registry=args.auto_load_registry == 'True',
-            force_new_registry=args.force_new_registry == 'True',
+            force_new_registry=args.force_new_registry,
             debug=args.debug,
             test_mode=args.test_mode
         )
@@ -68,6 +68,7 @@ class AnnotateConfig:
     debug: bool = False
     bed_file: Path = Path("annotations/hg38/GRCH38_repeatmasker.bed")
     test_mode: Optional[int] = None
+    proximal_span: int = 100
 
     @classmethod
     def from_args(cls, args):
@@ -78,5 +79,6 @@ class AnnotateConfig:
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
             bed_file=Path(args.bed),
             debug=args.debug,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            proximal_span=args.proximal_span
         )

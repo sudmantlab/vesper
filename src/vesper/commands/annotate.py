@@ -8,24 +8,25 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
-from vesper.processors.vcf import VCFProcessor
+from vesper.processors.vcf import VCFProcessor, VCFWriter
 from vesper.processors.annotations import BEDProcessor
 from vesper.utils.config import AnnotateConfig
 
-def process_annotate_chunk(variants: list, bed_proc: BEDProcessor, chunk_idx: int, logger: logging.Logger) -> None:
+def process_annotate_chunk(variants: list, bed_proc: BEDProcessor, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
     """Process a chunk of variants through the annotation pipeline.
     
     Args:
         variants: List of variants to process
         bed_proc: BEDProcessor instance
         chunk_idx: Index of this chunk for logging
+        proximal_span: Distance (+/-) to search for proximal features
         logger: Logger instance
     """
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
     
     for variant in variants:
         # Annotate with genomic features
-        bed_proc._annotate_variant(variant, proximal_span=500)
+        bed_proc._annotate_variant(variant, proximal_span=proximal_span)
     
     logger.info(f"Completed annotation chunk {chunk_idx}")
 
@@ -37,12 +38,10 @@ def run_annotate(args, logger):
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
         print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
 
-    # Create output directory if it doesn't exist
     if not config.output_dir.exists():
         config.output_dir.mkdir(parents=True)
         logger.info(f"Created output directory: {config.output_dir}")
     
-    # Load variants from VCF
     logger.info(f"Loading variants from {config.vcf_input}")
     variants = []
     with VCFProcessor(config.vcf_input, test_mode=config.test_mode) as vcf_proc:
@@ -72,6 +71,7 @@ def run_annotate(args, logger):
                 chunk, 
                 bed_proc,
                 idx,
+                config.proximal_span,
                 logger
             )
             for idx, chunk in enumerate(chunks)
@@ -95,3 +95,37 @@ def run_annotate(args, logger):
     print(f"{timestamp} - Completed annotation in {elapsed:.2f} seconds")
     print(f"{timestamp} - Annotated {len(variants)} variants")
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
+    
+    # Write annotated variants to output VCF file
+    output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
+    logger.info(f"Writing annotated variants to {output_vcf_path}")
+    print(f"{timestamp} - Writing annotated variants to {output_vcf_path}")
+    
+    start_write_time = time.time()
+    with Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(complete_style="green"), 
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        TimeRemainingColumn()
+    ) as progress, VCFWriter(output_vcf_path) as vcf_writer:
+        
+        task = progress.add_task("[cyan]Writing annotated variants...", total=len(variants))
+        vcf_writer.write_header(variants)
+        
+        for i, variant in enumerate(variants):
+            vcf_writer.write_record(variant)
+            progress.update(task, advance=1)
+            
+            if (i + 1) % 1000 == 0:
+                logger.info(f"Wrote {i + 1}/{len(variants)} variants")
+    
+    write_elapsed = time.time() - start_write_time
+    logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")
+    
+    # Create tabix index for the output VCF
+    logger.info(f"Creating tabix index for {output_vcf_path}")
+    VCFWriter.create_tabix_index(output_vcf_path)
+    
+    logger.info(f"Annotation pipeline completed successfully")
+    print(f"{timestamp} - Annotation pipeline completed successfully") 

@@ -148,26 +148,17 @@ class VCFWriter:
             # Create a new header
             contigs = set(v.variant.chrom for v in variants)
 
-            # Required VCF header fields
             self.write_header_line(buffer, "fileformat=VCFv4.2")
             self.write_header_line(buffer, "fileDate=" + datetime.now().strftime("%Y%m%d"))
             self.write_header_line(buffer, "source=vesper")
-            
-            # Add reference placeholder - required for proper indexing
             self.write_header_line(buffer, "reference=file:///seq/references/placeholder.fasta")
-            
-            # Add contigs with proper format
             for contig in contigs:
                 # TODO: Get real lengths of the contigs from the reference/BAM file!
                 self.write_header_line(buffer, f"contig=<ID={contig},length=10000000>")
-            
-            # Add FILTER definitions
             self.write_header_line(buffer, "FILTER=<ID=PASS,Description=\"All filters passed\">")  
             self.write_header_line(buffer, "FILTER=<ID=HSD,Description=\"High identity segmental duplication overlap\">")
             self.write_header_line(buffer, "FILTER=<ID=CEN,Description=\"Centromere overlap\">")
             self.write_header_line(buffer, "FILTER=<ID=REP,Description=\"High identity RepeatMasker overlap/proximal feature\">")
-            
-            # Add INFO field definitions
             self.write_header_line(buffer, "INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">")
             self.write_header_line(buffer, "INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of structural variant\">")
             self.write_header_line(buffer, "INFO=<ID=RNAMES,Number=.,Type=String,Description=\"Supporting read names\">")
@@ -178,12 +169,8 @@ class VCFWriter:
             self.write_header_line(buffer, "INFO=<ID=CONFIDENCE,Number=1,Type=Float,Description=\"Confidence score for the variant\">")
             self.write_header_line(buffer, "INFO=<ID=OVERLAPPING,Number=.,Type=String,Description=\"Overlapping annotated features\">")
             self.write_header_line(buffer, "INFO=<ID=PROXIMAL,Number=.,Type=String,Description=\"Proximal annotated features\">")
-            
-            # Add FORMAT field definitions
             self.write_header_line(buffer, "FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference-supporting reads\">")
             self.write_header_line(buffer, "FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant-supporting reads\">")
-            
-            # Add the column header line - must be tab-separated
             self.write_line(buffer, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE")
         
         return buffer.getvalue().rstrip()
@@ -234,19 +221,6 @@ class VCFWriter:
         vcf_record = variant.to_vcf_record()
         self.write_line(self.file, vcf_record)
     
-    def write_records(self, variants: List[VariantAnalysis], template_vcf: Optional[Path] = None) -> None:
-        """Write a list of VariantAnalysis objects to the VCF file.
-        
-        Args:
-            variants: List of VariantAnalysis objects to write
-            template_vcf: Optional path to VCF to copy header from
-        """
-        if not self.file:
-            raise RuntimeError("VCF file not opened. Use with-statement to open file.")
-            
-        for variant in variants:
-            self.write_record(variant)
-    
     @staticmethod
     def create_tabix_index(vcf_path: Path) -> None:
         """Create a tabix index for a VCF file.
@@ -254,9 +228,7 @@ class VCFWriter:
         Args:
             vcf_path: Path to the VCF file to index (must be bgzipped)
         """
-        # Check if the file is bgzipped
         if not str(vcf_path).endswith('.gz'):
             raise ValueError("VCF file must be bgzipped to create a tabix index!")
-            
-        # Create the index
+
         pysam.tabix_index(str(vcf_path), preset="vcf", force=True)
