@@ -34,4 +34,5 @@ six==1.17.0
 sortedcontainers==2.4.0
 typing_extensions==4.12.2
 tzdata==2025.1
+-e git+https://github.com/stacy-l/vesper.git@821a623757efcc7d10d68fbdb8a55f5f27513b2e#egg=vesper
 zipp==3.21.0
