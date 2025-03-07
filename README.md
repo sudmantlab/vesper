@@ -64,6 +64,9 @@ source venv/bin/activate
 
 2. Install dependencies:
 ```bash
+# Install dependencies
+pip install -r requirements.txt
+
 # pip (dev install)
 pip install -e ".[dev]"
 
@@ -71,8 +74,6 @@ pip install -e ".[dev]"
 pip install uv
 uv pip install -e ".[dev]"
 ```
-
-*Note*: The `requirements.txt` file is generated via `pip freeze > requirements.txt` for noting specific versions in the most recent functional build, but isn't used for repopulating the environment.
 
 ## Testing
 
