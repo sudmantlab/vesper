@@ -26,7 +26,6 @@ class ReadMetadata(BaseModel):
     class Config:
         frozen = True
 
-
 class VariantReadGroups(BaseModel):
     """ReadGroups (composed of AlignedReads) associated with a variant."""
     support: List[str] = Field(default_factory=list)

@@ -24,12 +24,10 @@ def process_refine_chunk(variants: list, read_proc: ReadProcessor, chunk_idx: in
     logger.info(f"Processing refinement chunk {chunk_idx} ({len(variants)} variants)")
     
     for variant in variants:
-        # Get read groups
         support_reads, nonsupport_reads = read_proc.get_read_groups(variant.variant)
         variant.support_reads = support_reads
         variant.nonsupport_reads = nonsupport_reads
         
-        # Calculate metrics and confidence
         variant._calculate_grouped_metrics()
         variant._calculate_confidence()
     
@@ -58,7 +56,7 @@ def run_refine(args, logger):
     print(f"{timestamp} - Loaded {len(variants)} variants")
     logger.info(f"Loaded {len(variants)} variants")
 
-    # Determine optimal chunk size and number of workers
+    # TODO: set config options for threads, memory, etc.
     n_workers = min(32, max(4, os.cpu_count() * 2))
     chunk_size = max(1, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
     chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
@@ -102,7 +100,6 @@ def run_refine(args, logger):
         elapsed = time.time() - start_time
         logger.info(f"Completed refinement in {elapsed:.2f} seconds")
 
-        # Calculate confidence score statistics
         confidence_scores = [v.confidence for v in variants if v.confidence is not None]
         if confidence_scores:
             mean_conf = sum(confidence_scores) / len(confidence_scores)
@@ -131,7 +128,6 @@ def run_refine(args, logger):
     print(f"    Max: {max_conf:.3f}")
     print(f"    High-confidence variants: {len(confident_variants)} ({pct_confident:.1f}%)")
 
-    # Write refined variants to output VCF file
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.refined.vcf.gz')
     logger.info(f"Writing refined variants to {output_vcf_path}")
     print(f"{timestamp} - Writing refined variants to {output_vcf_path}")
@@ -158,7 +154,6 @@ def run_refine(args, logger):
     write_elapsed = time.time() - start_write_time
     logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")
     
-    # Create tabix index for the output VCF
     logger.info(f"Creating tabix index for {output_vcf_path}")
     VCFWriter.create_tabix_index(output_vcf_path)
     

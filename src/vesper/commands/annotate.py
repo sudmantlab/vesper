@@ -25,7 +25,6 @@ def process_annotate_chunk(variants: list, bed_proc: BEDProcessor, chunk_idx: in
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
     
     for variant in variants:
-        # Annotate with genomic features
         bed_proc._annotate_variant(variant, proximal_span=proximal_span)
     
     logger.info(f"Completed annotation chunk {chunk_idx}")
@@ -48,7 +47,7 @@ def run_annotate(args, logger):
         variants = list(vcf_proc.instantiate_variants())
     logger.info(f"Loaded {len(variants)} variants")
     
-    # Determine optimal chunk size and number of workers
+    # TODO: set config options for threads, memory, etc.
     n_workers = min(32, max(4, os.cpu_count() * 2))
     chunk_size = max(1, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
     chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
@@ -96,7 +95,6 @@ def run_annotate(args, logger):
     print(f"{timestamp} - Annotated {len(variants)} variants")
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     
-    # Write annotated variants to output VCF file
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
     logger.info(f"Writing annotated variants to {output_vcf_path}")
     print(f"{timestamp} - Writing annotated variants to {output_vcf_path}")
@@ -123,7 +121,6 @@ def run_annotate(args, logger):
     write_elapsed = time.time() - start_write_time
     logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")
     
-    # Create tabix index for the output VCF
     logger.info(f"Creating tabix index for {output_vcf_path}")
     VCFWriter.create_tabix_index(output_vcf_path)
     

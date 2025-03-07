@@ -52,45 +52,40 @@ class Variant:
             ValueError: If record is invalid or missing required fields
         """
         try:
-            # Handle SVTYPE
+            # Handle SVTYPE Enum conversion
             try:
                 sv_type = SVType[record.info['SVTYPE']]
             except KeyError:
                 raise ValueError(f"Unknown SVTYPE: {record.info['SVTYPE']}")
                 
-            # Calculate SV length
+            # Calculate SV length - TODO (refine?): check against insertion seq length, NM edit distance
             sv_length = abs(record.info.get('SVLEN', 0))
             if sv_length == 0 and record.stop:
                 sv_length = abs(record.stop - record.start)
             
-            # Get supporting read names if present
+            # Get supporting read names if present – TODO: handle compatibility with VCFs where this is not present
             rnames = []
             if 'RNAMES' in record.info:
                 rnames = str(record.info['RNAMES'][0]).split(',')
             
-            # Convert filter field to string
-            if record.filter is None:
-                filter_str = "PASS"
-            else:
-                # pysam filters are a set of strings or special filter objects
-                filter_list = []
-                for f in record.filter:
-                    if hasattr(f, 'name'):  # pysam filter object
-                        filter_list.append(str(f.name))
-                    else:  # string
-                        filter_list.append(str(f))
-                filter_str = ";".join(filter_list) if filter_list else "PASS"
+            # handle filter field conversion
+            # TODO: check cases where None in pysam
+            filter_list = []
+            for f in record.filter:
+                if hasattr(f, 'name'):
+                    filter_list.append(str(f.name))
+                else:
+                    filter_list.append(str(f))
+            filter_str = ";".join(filter_list) if filter_list else "PASS"
             
-            # Convert info dict values to basic Python types
             info_dict = {}
             for key, value in record.info.items():
-                if isinstance(value, tuple):
-                    # Some pysam info fields come as tuples
+                if isinstance(value, tuple): 
                     info_dict[key] = list(value)
                 else:
                     info_dict[key] = value
             
-            # Convert sample data to basic Python types
+            # TODO: unlikely to be needed given single sample processing, but keep and review later
             sample_dicts = []
             for sample in record.samples.values():
                 sample_dict = {}

@@ -32,11 +32,11 @@ vesper/
 > **Note:** At the moment, only retrotransposon discovery is supported 😔
 
 The output of all three functions is a VCF file with varying levels of confidence:
-- `vesper call` - `{filename}.candidates.vcf.gz`, unfiltered candidate variants
+- WIP: vesper call` - `{filename}.candidates.vcf.gz`, unfiltered candidate variants
 - `vesper annotate` - `{filename}.annotated.vcf.gz`, variants with reference annotations
 - `vesper refine` - `{filename}.refined.vcf.gz`, variants with both annotations and confidence scores
 
-### Utilities
+### Utilities (WIP)
 
 `vesper` provides several utilities for examining and manipulating variants.
 - `vesper construct` can be used to perform local reassembly of complex mosaic variants.
@@ -46,7 +46,9 @@ The output of all three functions is a VCF file with varying levels of confidenc
 
 Use `venv` (Python's built-in virtual environment) or `conda` to install. (TODO: build Docker image before release)
 
-### Option 1: Using venv + pip/uv
+### Option 1: Using venv
+
+TODO: add instructions for using `conda`, proper `requirements.txt` and `environment.yml` files, `pip` install via pypi, etc...
 
 1. Create and activate a virtual environment:
 ```bash
@@ -60,29 +62,17 @@ source venv/bin/activate
 .\venv\Scripts\activate
 ```
 
-2. Install dependencies (use `pip` or `uv`):
+2. Install dependencies:
 ```bash
 # pip (dev install)
 pip install -e ".[dev]"
 
-# pip
-pip install .
-
-# uv
-uv pip install .
+# uv (slightly faster)
+pip install uv
+uv pip install -e ".[dev]"
 ```
 
-### Option 2: Using conda
-
-Create and activate the conda environment (use `conda` or `mamba`):
-```bash
-# Create environment from specification
-conda env create -f environment.yml
-
-# Activate the environment
-conda activate vesper
-```
-
+*Note*: The `requirements.txt` file is generated via `pip freeze > requirements.txt` for noting specific versions in the most recent functional build, but isn't used for repopulating the environment.
 
 ## Testing
 
@@ -95,35 +85,3 @@ This will:
 - Run all tests in the `tests/` directory
 - Generate coverage reports
 - Show test results in verbose mode
-
-## Environment Management Tips
-
-### Updating Dependencies
-
-If you add new dependencies:
-1. Add them to `pyproject.toml`
-2. Update `requirements.txt`:
-```bash
-pip freeze > requirements.txt
-```
-3. Update `environment.yml` manually with the new package
-
-### Recreating Environments
-
-For venv:
-```bash
-# if in venv, deactivate it
-deactivate
-# Remove old environment
-rm -rf venv/
-# Create new one following installation steps
-```
-
-For conda:
-```bash
-# Remove old environment
-conda deactivate
-conda env remove -n vesper
-# Create new one
-conda env create -f environment.yml
-``` 
