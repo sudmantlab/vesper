@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 @dataclass
 class CallConfig:
@@ -62,11 +62,11 @@ class AnnotateConfig:
     # Required arguments
     vcf_input: Path
     output_dir: Path
+    bed_files: List[Path]
     
     # Optional arguments
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
-    bed_file: Path = Path("annotations/hg38/GRCH38_repeatmasker.bed")
     test_mode: Optional[int] = None
     proximal_span: int = 100
 
@@ -77,7 +77,7 @@ class AnnotateConfig:
             vcf_input=Path(args.vcf),
             output_dir=Path(args.output_dir),
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
-            bed_file=Path(args.bed),
+            bed_files=[Path(bed) for bed in args.bed],
             debug=args.debug,
             test_mode=args.test_mode,
             proximal_span=args.proximal_span

@@ -71,14 +71,14 @@ Example:
         formatter_class=parser.formatter_class,
         epilog = """
 Example:
-  vesper annotate --vcf input.vcf --bed annotations.bed --output-dir output/
-  vesper annotate --vcf input.vcf --output-dir output/ --test-mode 50
+  vesper annotate --vcf input.vcf --bed annotations1.bed annotations2.bed --output-dir output/
+  vesper annotate --vcf input.vcf --bed annotations.bed --output-dir output/ --test-mode 50
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
                                 help="Input VCF file (required)")
-    annotate_parser.add_argument("--bed", "-b", default="annotations/hg38/GRCH38_repeatmasker.bed",
-                                help="BED file for annotations (default: annotations/hg38/GRCH38_repeatmasker.bed)")
+    annotate_parser.add_argument("--bed", "-b", required=True, nargs='+',
+                                help="BED file(s) for annotations. Multiple files can be provided.")
     annotate_parser.add_argument("--output-dir", "-o", required=True,
                                 help="Output directory (required)")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
