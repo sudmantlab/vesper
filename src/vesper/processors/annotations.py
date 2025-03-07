@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import os
 import time
+import gzip
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -243,7 +244,14 @@ class BEDProcessor(AnnotationProcessor):
         self.logger.info(f"Indexing {self.filepath}...")
         batch = []
 
-        with open(self.filepath, 'r') as f:
+        if str(self.filepath).endswith(('.gz', '.gzip')):
+            file_opener = gzip.open
+            mode = 'rt'
+        else:
+            file_opener = open
+            mode = 'r'
+
+        with file_opener(self.filepath, mode) as f:
             for i, line in enumerate(f):
                 if line.startswith('#') or not line.strip():
                     continue
@@ -326,16 +334,26 @@ class GFFProcessor(AnnotationProcessor):
                 end INTEGER,
                 name TEXT,
                 score REAL,
-                strand TEXT
+                strand TEXT,
+                feature_type TEXT,
+                attributes TEXT
             )
         ''')
         conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
         conn.execute('CREATE INDEX idx_chrom_end ON intervals (chrom, end)')
+        conn.execute('CREATE INDEX idx_feature_type ON intervals (feature_type)')
 
         self.logger.info(f"Indexing {self.filepath}...")
         batch = []
+        
+        if str(self.filepath).endswith(('.gz', '.gzip')):
+            file_opener = gzip.open
+            mode = 'rt'
+        else:
+            file_opener = open
+            mode = 'r'
 
-        with open(self.filepath, 'r') as f:
+        with file_opener(self.filepath, mode) as f:
             for i, line in enumerate(f):
                 if line.startswith('#') or not line.strip():
                     continue
@@ -355,15 +373,23 @@ class GFFProcessor(AnnotationProcessor):
                 frame = fields[7]
 
                 # Parse attributes into key-value pairs
-                metadata = {}
-                if fields[8]:
-                    attr_pairs = fields[8].strip().split(';')
-                    for pair in attr_pairs:
-                        if '=' in pair:
-                            key, value = pair.split('=', 1)
-                            metadata[key.strip()] = value.strip()
+                attributes = fields[8].strip() if len(fields) > 8 else ""
+                attributes_dict = {}
                 
-                batch.append((chrom, start, end, name, score, strand, frame, metadata))
+                if attributes:
+                    parts = attributes.split(';')
+                    for part in parts:
+                        if not part.strip():
+                            continue
+                        if '=' in part:
+                            key, value = part.split('=', 1)
+                            attributes_dict[key.strip()] = value.strip()
+                
+                # Extract ID or Name as the name field
+                name = attributes_dict.get('ID', attributes_dict.get('Name', feature))
+                
+                # Store key attributes and the whole attribute string
+                batch.append((chrom, start, end, name, score, strand, feature, attributes))
                 
                 if len(batch) >= batch_size:
                     conn.executemany(

@@ -62,7 +62,10 @@ class AnnotateConfig:
     # Required arguments
     vcf_input: Path
     output_dir: Path
-    bed_files: List[Path]
+    
+    # Annotation files
+    bed_files: List[Path] = None
+    gff_files: List[Path] = None
     
     # Optional arguments
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
@@ -73,12 +76,24 @@ class AnnotateConfig:
     @classmethod
     def from_args(cls, args):
         """Create AnnotateConfig instance from parsed command line arguments."""
-        return cls(
+        config = cls(
             vcf_input=Path(args.vcf),
             output_dir=Path(args.output_dir),
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
-            bed_files=[Path(bed) for bed in args.bed],
             debug=args.debug,
             test_mode=args.test_mode,
             proximal_span=args.proximal_span
         )
+        
+        # Handle bed and gff files
+        if hasattr(args, 'bed') and args.bed:
+            config.bed_files = [Path(bed) for bed in args.bed]
+        else:
+            config.bed_files = []
+            
+        if hasattr(args, 'gff') and args.gff:
+            config.gff_files = [Path(gff) for gff in args.gff]
+        else:
+            config.gff_files = []
+            
+        return config

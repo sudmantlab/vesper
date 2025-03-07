@@ -9,15 +9,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 from vesper.processors.vcf import VCFProcessor, VCFWriter
-from vesper.processors.annotations import BEDProcessor
+from vesper.processors.annotations import BEDProcessor, GFFProcessor
 from vesper.utils.config import AnnotateConfig
 
-def process_annotate_chunk(variants: list, bed_procs: list, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
-    """Process a chunk of variants through the annotation pipeline with multiple BED processors.
+def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
+    """Process a chunk of variants through the annotation pipeline with multiple annotation processors.
     
     Args:
         variants: List of variants to process
-        bed_procs: List of BEDProcessor instances
+        annotation_procs: List of AnnotationProcessor instances (BED or GFF)
         chunk_idx: Index of this chunk for logging
         proximal_span: Distance (+/-) to search for proximal features
         logger: Logger instance
@@ -25,8 +25,8 @@ def process_annotate_chunk(variants: list, bed_procs: list, chunk_idx: int, prox
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
     
     for variant in variants:
-        for bed_proc in bed_procs:
-            bed_proc._annotate_variant(variant, proximal_span=proximal_span)
+        for proc in annotation_procs:
+            proc._annotate_variant(variant, proximal_span=proximal_span)
     
     logger.info(f"Completed annotation chunk {chunk_idx}")
 
@@ -38,9 +38,16 @@ def run_annotate(args, logger):
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
         print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
         
-    logger.info(f"Using {len(config.bed_files)} BED file(s) for annotation:")
-    for bed_file in config.bed_files:
-        logger.info(f"  - {bed_file}")
+    total_annotation_files = len(config.bed_files) + len(config.gff_files)
+    logger.info(f"Using {total_annotation_files} annotation file(s):")
+    if config.bed_files:
+        logger.info(f"BED file(s) ({len(config.bed_files)}):")
+        for bed_file in config.bed_files:
+            logger.info(f"  - {bed_file}")
+    if config.gff_files:
+        logger.info(f"GFF file(s) ({len(config.gff_files)}):")
+        for gff_file in config.gff_files:
+            logger.info(f"  - {gff_file}")
 
     if not config.output_dir.exists():
         config.output_dir.mkdir(parents=True)
@@ -60,12 +67,6 @@ def run_annotate(args, logger):
     logger.info(f"Processing {len(chunks)} variant chunks with {n_workers} workers")
     start_time = time.time()
 
-    # Initialize multiple BED processors
-    bed_procs = []
-    for bed_file in config.bed_files:
-        logger.info(f"Loading BED file: {bed_file}")
-        bed_procs.append(BEDProcessor(bed_file))
-
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
                  TaskProgressColumn(),
@@ -73,9 +74,32 @@ def run_annotate(args, logger):
                  TimeRemainingColumn()) as progress, \
          ThreadPoolExecutor(max_workers=n_workers) as executor:
         
-        # Open all BED processors using context managers
-        for bed_proc in bed_procs:
-            bed_proc.__enter__()
+        task = progress.add_task("[cyan]Loading annotation files...", total=len(config.bed_files) + len(config.gff_files))
+
+        # Initialize annotation processors
+        annotation_procs = []
+        
+        for bed_file in config.bed_files:
+            progress.update(task, description=f"Loading BED file: {bed_file.name}")
+            logger.info(f"Loading BED file: {bed_file.name}")
+            annotation_procs.append(BEDProcessor(bed_file))
+            progress.update(task, advance=1)
+        
+        for gff_file in config.gff_files:
+            progress.update(task, description=f"Loading GFF file: {gff_file.name}")
+            logger.info(f"Loading GFF file: {gff_file.name}")
+            annotation_procs.append(GFFProcessor(gff_file))
+            progress.update(task, advance=1)
+    with Progress(TextColumn("[bold blue]{task.description}"),
+                 BarColumn(complete_style="green"),
+                 TaskProgressColumn(),
+                 TimeElapsedColumn(),
+                 TimeRemainingColumn()) as progress, \
+         ThreadPoolExecutor(max_workers=n_workers) as executor:
+        
+        # Open all annotation processors using context managers
+        for proc in annotation_procs:
+            proc.__enter__()
         
         try:
             task = progress.add_task("[cyan]Annotating variants...", total=len(variants))           
@@ -84,7 +108,7 @@ def run_annotate(args, logger):
                 executor.submit(
                     process_annotate_chunk, 
                     chunk, 
-                    bed_procs,
+                    annotation_procs,
                     idx,
                     config.proximal_span,
                     logger
@@ -103,20 +127,39 @@ def run_annotate(args, logger):
                     logger.error(f"Error processing chunk: {str(e)}")
                     raise
         finally:
-            for bed_proc in bed_procs:
-                bed_proc.__exit__(None, None, None)
+            for proc in annotation_procs:
+                proc.__exit__(None, None, None)
     
     elapsed = time.time() - start_time
     logger.info(f"Completed annotation in {elapsed:.2f} seconds")
-    logger.info(f"Annotated {len(variants)} variants using {len(config.bed_files)} BED file(s)")
-    for bed_file in config.bed_files:
-        logger.info(f"  - {bed_file}")
+    logger.info(f"Annotated {len(variants)} variants using {total_annotation_files} annotation file(s)")
+    
+    if config.bed_files:
+        logger.info(f"BED file(s) ({len(config.bed_files)}):")
+        for bed_file in config.bed_files:
+            logger.info(f"  - {bed_file}")
+            
+    if config.gff_files:
+        logger.info(f"GFF file(s) ({len(config.gff_files)}):")
+        for gff_file in config.gff_files:
+            logger.info(f"  - {gff_file}")
+            
     logger.info(f"Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     logger.info(f"Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
+    
     print(f"{timestamp} - Completed annotation in {elapsed:.2f} seconds")
-    print(f"{timestamp} - Annotated {len(variants)} variants using {len(config.bed_files)} BED file(s)")
-    for bed_file in config.bed_files:
-        print(f"  - {bed_file}")
+    print(f"{timestamp} - Annotated {len(variants)} variants using {total_annotation_files} annotation file(s)")
+    
+    if config.bed_files:
+        print(f"{timestamp} - BED file(s) ({len(config.bed_files)}):")
+        for bed_file in config.bed_files:
+            print(f"  - {bed_file}")
+            
+    if config.gff_files:
+        print(f"{timestamp} - GFF file(s) ({len(config.gff_files)}):")
+        for gff_file in config.gff_files:
+            print(f"  - {gff_file}")
+            
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     print(f"{timestamp} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     

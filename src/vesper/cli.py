@@ -72,15 +72,22 @@ Example:
         epilog = """
 Example:
   vesper annotate --vcf input.vcf --bed annotations1.bed annotations2.bed --output-dir output/
-  vesper annotate --vcf input.vcf --bed annotations.bed --output-dir output/ --test-mode 50
+  vesper annotate --vcf input.vcf --gff annotations.gff3.gz --output-dir output/
+  vesper annotate --vcf input.vcf --bed annotations.bed --gff annotations.gff3.gz --output-dir output/ --test-mode 50
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
                                 help="Input VCF file (required)")
-    annotate_parser.add_argument("--bed", "-b", required=True, nargs='+',
-                                help="BED file(s) for annotations. Multiple files can be provided.")
     annotate_parser.add_argument("--output-dir", "-o", required=True,
                                 help="Output directory (required)")
+    
+    # At least one of --bed or --gff must be provided
+    annotate_files = annotate_parser.add_argument_group('annotation files')
+    annotate_files.add_argument("--bed", "-b", nargs='+', default=[],
+                                help="BED file(s) for annotations. Multiple files can be provided.")
+    annotate_files.add_argument("--gff", "-g", nargs='+', default=[],
+                                help="GFF/GTF file(s) for annotations. Multiple files can be provided.")
+    
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,
@@ -139,6 +146,11 @@ Example:
     subparser.__class__ = VesperArgumentParser
     
     args = parser.parse_args()
+    
+    # Validate that at least one annotation file is provided for annotate command
+    if args.command == 'annotate' and not (args.bed or args.gff):
+        subparser.error("At least one of --bed or --gff must be provided")
+    
     return args
 
 def main():
