@@ -72,7 +72,7 @@ pip install uv
 uv pip install -e ".[dev]"
 ```
 
-*Note*: The `requirements.txt` file is generated via `pip freeze > requirements.txt` for noting specific versions in the most recent functional build, but isn't used for repopulating the environment.
+`requirements.txt` is generated via `pip freeze > requirements.txt` for noting specific versions in the most recent functional build and can also be used to install dependencies.
 
 ## Testing
 

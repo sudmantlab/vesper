@@ -1,13 +1,8 @@
 annotated-types==0.7.0
-argcomplete==3.5.3
-argh==0.31.3
 black==25.1.0
 click==8.1.8
 coverage==7.6.12
-gffutils==0.13
-importlib_metadata==8.6.1
 iniconfig==2.0.0
-intervaltree==3.1.0
 isort==6.0.1
 markdown-it-py==3.0.0
 mdurl==0.1.2
@@ -20,7 +15,6 @@ platformdirs==4.3.6
 pluggy==1.5.0
 pydantic==2.10.6
 pydantic_core==2.27.2
-pyfaidx==0.8.1.3
 Pygments==2.19.1
 pysam==0.23.0
 pytest==8.3.5
@@ -29,10 +23,6 @@ python-dateutil==2.9.0.post0
 pytz==2025.1
 rich==13.9.4
 rich-argparse==1.7.0
-simplejson==3.20.1
 six==1.17.0
-sortedcontainers==2.4.0
 typing_extensions==4.12.2
 tzdata==2025.1
--e git+https://github.com/stacy-l/vesper.git@821a623757efcc7d10d68fbdb8a55f5f27513b2e#egg=vesper
-zipp==3.21.0
