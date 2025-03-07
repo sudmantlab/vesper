@@ -70,10 +70,19 @@ Example:
         description='Annotate structural variants with overlapping genomic features.',
         formatter_class=parser.formatter_class,
         epilog = """
-Example:
-  vesper annotate --vcf input.vcf --bed annotations1.bed annotations2.bed --output-dir output/
-  vesper annotate --vcf input.vcf --gff annotations.gff3.gz --output-dir output/
-  vesper annotate --vcf input.vcf --bed annotations.bed --gff annotations.gff3.gz --output-dir output/ --test-mode 50
+Usage notes:
+  - At least one of --bed or --gff must be provided.
+  - Use --bed-names and/or --gff-names to provide shorthand names for each file.
+  - Names must be unique across all annotation files.
+
+Examples:
+  # Single annotation file
+  vesper annotate --vcf input.vcf --bed annotations.bed --bed-names repeats --output-dir output/
+  vesper annotate --vcf input.vcf --gff annotations.gff3.gz --gff-names genes --output-dir output/
+  
+  # Multiple annotation files
+  vesper annotate --vcf input.vcf --bed annotations1.bed annotations2.bed --bed-names repeats centromeres --output-dir output/
+  vesper annotate --vcf input.vcf --gff annotations1.gff3.gz annotations2.gff3.gz --gff-names genes regulatory --output-dir output/
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
@@ -81,12 +90,15 @@ Example:
     annotate_parser.add_argument("--output-dir", "-o", required=True,
                                 help="Output directory (required)")
     
-    # At least one of --bed or --gff must be provided
     annotate_files = annotate_parser.add_argument_group('annotation files')
     annotate_files.add_argument("--bed", "-b", nargs='+', default=[],
                                 help="BED file(s) for annotations. Multiple files can be provided.")
+    annotate_files.add_argument("--bed-names", "-bn", nargs='+', default=[],
+                                help="Shorthand names for BED files (required). Must match number of BED files.")
     annotate_files.add_argument("--gff", "-g", nargs='+', default=[],
                                 help="GFF/GTF file(s) for annotations. Multiple files can be provided.")
+    annotate_files.add_argument("--gff-names", "-gn", nargs='+', default=[],
+                                help="Shorthand names for GFF files (required). Must match number of GFF files.")
     
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
@@ -143,13 +155,35 @@ Example:
     elif args.command == 'refine':
         subparser = refine_parser
 
-    subparser.__class__ = VesperArgumentParser
     
     args = parser.parse_args()
     
-    # Validate that at least one annotation file is provided for annotate command
-    if args.command == 'annotate' and not (args.bed or args.gff):
-        subparser.error("At least one of --bed or --gff must be provided")
+    if args.command == 'annotate':
+        if not (args.bed or args.gff):
+            subparser.error("ERROR: At least one of --bed or --gff must be provided")
+        
+        if (args.bed and args.gff) and not (args.bed_names and args.gff_names):
+            subparser.error("ERROR: Use --bed-names (-bn) and --gff-names (-gn) to provide shorthand names for each file.")
+        if args.bed and not args.bed_names:
+            subparser.error("ERROR: Add shorthand name(s) for BED files with --bed-names (-bn)")
+        if args.gff and not args.gff_names:
+            subparser.error("ERROR: Add shorthand name(s) for GFF files with --gff-names (-gn)")
+            
+        # Check that number of names matches number of files
+        if args.bed_names and len(args.bed_names) != len(args.bed):
+            subparser.error(f"ERROR: Number of BED names ({len(args.bed_names)}) must match number of BED files ({len(args.bed)})")
+        if args.gff_names and len(args.gff_names) != len(args.gff):
+            subparser.error(f"ERROR: Number of GFF names ({len(args.gff_names)}) must match number of GFF files ({len(args.gff)})")
+
+        # Check for duplicate names
+        if args.bed_names and len(set(args.bed_names)) != len(args.bed_names):
+            subparser.error("ERROR: Duplicate names found in --bed-names. Names must be unique.")
+        if args.gff_names and len(set(args.gff_names)) != len(args.gff_names):
+            subparser.error("ERROR: Duplicate names found in --gff-names. Names must be unique.")
+        if args.bed_names and args.gff_names:
+            all_names = args.bed_names + args.gff_names
+            if len(set(all_names)) != len(all_names):
+                subparser.error("ERROR: Names must be unique across both BED and GFF files.")
     
     return args
 

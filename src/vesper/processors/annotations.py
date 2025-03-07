@@ -17,14 +17,17 @@ class GenomicInterval:
     chrom: str
     start: int
     end: int
+    source: str  # Required source identifier for the annotation
     metadata: dict = None
 
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
+        if not self.source:
+            raise ValueError("Source must be provided for GenomicInterval")
 
     def __repr__(self) -> str:
-        return f"GenomicInterval(chrom={self.chrom}, start={self.start}, end={self.end}, metadata={self.metadata})"
+        return f"GenomicInterval(source={self.source}, chrom={self.chrom}, start={self.start}, end={self.end}, metadata={self.metadata})"
 
     @property
     def length(self) -> int:
@@ -33,6 +36,7 @@ class GenomicInterval:
     def to_dict(self) -> dict:
         """Convert interval to a flattened dictionary."""
         result = {
+            'source': self.source,
             'chrom': self.chrom,
             'start': self.start,
             'end': self.end,
@@ -46,9 +50,10 @@ class GenomicInterval:
 class AnnotationProcessor(ABC):
     """Base class for processing genomic annotation files."""
     
-    def __init__(self, filepath: Union[str, Path]):
+    def __init__(self, filepath: Union[str, Path], source_name: str):
         self.logger = logging.getLogger(__name__)
         self.filepath = Path(filepath)
+        self.source_name = source_name
         self.db_path: Optional[Path] = None
         self._local = threading.local()
         self._local.conn = None
@@ -127,6 +132,7 @@ class AnnotationProcessor(ABC):
         cursor = conn.execute(query, (chrom, pos, pos))
         
         return [GenomicInterval(
+            source=self.source_name,
             chrom=row['chrom'],
             start=row['start'],
             end=row['end'],
@@ -161,6 +167,7 @@ class AnnotationProcessor(ABC):
         cursor = conn.execute(query, (pos, pos, chrom, start, end, start, end))
         
         return [GenomicInterval(
+            source=self.source_name,
             chrom=row['chrom'],
             start=row['start'],
             end=row['end'],

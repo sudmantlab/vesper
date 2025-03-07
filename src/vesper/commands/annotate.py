@@ -42,12 +42,14 @@ def run_annotate(args, logger):
     logger.info(f"Using {total_annotation_files} annotation file(s):")
     if config.bed_files:
         logger.info(f"BED file(s) ({len(config.bed_files)}):")
-        for bed_file in config.bed_files:
-            logger.info(f"  - {bed_file}")
+        for i, bed_file in enumerate(config.bed_files):
+            bed_name = config.bed_names[i] if config.bed_names and i < len(config.bed_names) else bed_file.stem
+            logger.info(f"  - {bed_file} (source: '{bed_name}')")
     if config.gff_files:
         logger.info(f"GFF file(s) ({len(config.gff_files)}):")
-        for gff_file in config.gff_files:
-            logger.info(f"  - {gff_file}")
+        for i, gff_file in enumerate(config.gff_files):
+            gff_name = config.gff_names[i] if config.gff_names and i < len(config.gff_names) else gff_file.stem
+            logger.info(f"  - {gff_file} (source: '{gff_name}')")
 
     if not config.output_dir.exists():
         config.output_dir.mkdir(parents=True)
@@ -73,23 +75,27 @@ def run_annotate(args, logger):
                  TimeElapsedColumn(),
                  TimeRemainingColumn()) as progress, \
          ThreadPoolExecutor(max_workers=n_workers) as executor:
-        
-        task = progress.add_task("[cyan]Loading annotation files...", total=len(config.bed_files) + len(config.gff_files))
 
-        # Initialize annotation processors
         annotation_procs = []
         
-        for bed_file in config.bed_files:
-            progress.update(task, description=f"Loading BED file: {bed_file.name}")
-            logger.info(f"Loading BED file: {bed_file.name}")
-            annotation_procs.append(BEDProcessor(bed_file))
+        # Use BED names from config (validation already ensures names are available)
+        for i, bed_file in enumerate(config.bed_files):
+            task = progress.add_task("[cyan]Loading BED files...", total=len(config.bed_files))
+            bed_name = config.bed_names[i]
+            progress.update(task, description=f"Loading BED file: {bed_file.name} ({bed_name})")
+            logger.info(f"Loading BED file: {bed_file.name} as '{bed_name}'")
+            annotation_procs.append(BEDProcessor(bed_file, source_name=bed_name))
             progress.update(task, advance=1)
         
-        for gff_file in config.gff_files:
-            progress.update(task, description=f"Loading GFF file: {gff_file.name}")
-            logger.info(f"Loading GFF file: {gff_file.name}")
-            annotation_procs.append(GFFProcessor(gff_file))
+        # Use GFF names from config (validation already ensures names are available)
+        for i, gff_file in enumerate(config.gff_files):
+            task = progress.add_task("[cyan]Loading GFF files...", total=len(config.gff_files))
+            gff_name = config.gff_names[i]
+            progress.update(task, description=f"Loading GFF file: {gff_file.name} ({gff_name})")
+            logger.info(f"Loading GFF file: {gff_file.name} as '{gff_name}'")
+            annotation_procs.append(GFFProcessor(gff_file, source_name=gff_name))
             progress.update(task, advance=1)
+            
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
                  TaskProgressColumn(),
@@ -136,13 +142,15 @@ def run_annotate(args, logger):
     
     if config.bed_files:
         logger.info(f"BED file(s) ({len(config.bed_files)}):")
-        for bed_file in config.bed_files:
-            logger.info(f"  - {bed_file}")
+        for i, bed_file in enumerate(config.bed_files):
+            bed_name = config.bed_names[i]
+            logger.info(f"  - {bed_file} (source: '{bed_name}')")
             
     if config.gff_files:
         logger.info(f"GFF file(s) ({len(config.gff_files)}):")
-        for gff_file in config.gff_files:
-            logger.info(f"  - {gff_file}")
+        for i, gff_file in enumerate(config.gff_files):
+            gff_name = config.gff_names[i]
+            logger.info(f"  - {gff_file} (source: '{gff_name}')")
             
     logger.info(f"Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     logger.info(f"Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
@@ -152,13 +160,15 @@ def run_annotate(args, logger):
     
     if config.bed_files:
         print(f"{timestamp} - BED file(s) ({len(config.bed_files)}):")
-        for bed_file in config.bed_files:
-            print(f"  - {bed_file}")
+        for i, bed_file in enumerate(config.bed_files):
+            bed_name = config.bed_names[i]
+            print(f"  - {bed_file} (source: '{bed_name}')")
             
     if config.gff_files:
         print(f"{timestamp} - GFF file(s) ({len(config.gff_files)}):")
-        for gff_file in config.gff_files:
-            print(f"  - {gff_file}")
+        for i, gff_file in enumerate(config.gff_files):
+            gff_name = config.gff_names[i]
+            print(f"  - {gff_file} (source: '{gff_name}')")
             
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     print(f"{timestamp} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 

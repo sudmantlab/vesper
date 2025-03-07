@@ -67,6 +67,10 @@ class AnnotateConfig:
     bed_files: List[Path] = None
     gff_files: List[Path] = None
     
+    # Annotation names
+    bed_names: List[str] = None
+    gff_names: List[str] = None
+    
     # Optional arguments
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
@@ -85,15 +89,31 @@ class AnnotateConfig:
             proximal_span=args.proximal_span
         )
         
-        # Handle bed and gff files
+        # Handle bed and gff files and their names
         if hasattr(args, 'bed') and args.bed:
             config.bed_files = [Path(bed) for bed in args.bed]
+            # If names are provided, use them, otherwise use filenames
+            if hasattr(args, 'bed_names') and args.bed_names:
+                if len(args.bed_names) != len(args.bed):
+                    raise ValueError("Number of BED names must match number of BED files")
+                config.bed_names = args.bed_names
+            else:
+                config.bed_names = []
         else:
             config.bed_files = []
+            config.bed_names = []
             
         if hasattr(args, 'gff') and args.gff:
             config.gff_files = [Path(gff) for gff in args.gff]
+            # If names are provided, use them, otherwise use filenames
+            if hasattr(args, 'gff_names') and args.gff_names:
+                if len(args.gff_names) != len(args.gff):
+                    raise ValueError("Number of GFF names must match number of GFF files")
+                config.gff_names = args.gff_names
+            else:
+                config.gff_names = []
         else:
             config.gff_files = []
+            config.gff_names = []
             
         return config
