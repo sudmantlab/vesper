@@ -232,7 +232,6 @@ class ReadProcessor:
             with open(registry_metadata_path, 'w') as f:
                 json.dump(registry_metadata.model_dump(), f)
             
-            # Save variant read groups
             variant_groups_dict = {}
             for variant_id, groups in self._variant_read_groups.items():
                 variant_groups_dict[variant_id] = VariantReadGroups(**groups).model_dump()
@@ -241,7 +240,6 @@ class ReadProcessor:
             with open(variant_groups_path, 'w') as f:
                 json.dump(variant_groups_dict, f)
             
-            # Save read metadata
             read_metadata = {}
             for name, read in self._read_registry.items():
                 read_model = ReadMetadata(

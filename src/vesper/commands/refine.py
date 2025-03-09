@@ -44,7 +44,6 @@ def run_refine(args, logger):
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
         print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
 
-    # Create output directory if it doesn't exist
     if not config.output_dir.exists():
         config.output_dir.mkdir(parents=True)
         logger.info(f"Created output directory: {config.output_dir}")

@@ -161,27 +161,44 @@ class VariantAnalysis:
         self.metrics['comparison'] = self.support_reads.compare_stats(self.nonsupport_reads)
             
     def _calculate_confidence(self) -> None:
-        """Basic confidence calculation based on mapq differential and softclipping.
+        """Confidence calculation based on mapq, softclipping, and secondary/supplementary alignments.
         
         Should be called after _calculate_grouped_metrics() and adding annotations.
+        The calculation accounts for and penalizes variants supported by 
+        secondary and supplementary alignments.
         """
         if not self.metrics:
             self.confidence = 0.0
             return
             
-        # Calculate mapq diff between support and nonsupport reads as a ratio between support and nonsupport
-        # Under the assumption that support reads may have worse alignment quality
         mapq_ratio = max(1, self.metrics['comparison']['mapq_mean'] / self.metrics['comparison']['mapq_mean_other'])
         
-        # Calculate softclip diff between support and nonsupport reads as a ratio between support and nonsupport
-        # Under the same assumption as above
-        support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
-        nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
-        softclip_ratio = max(1, support_pct / nonsupport_pct)
+        softclip_support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
+        softclip_nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
+        softclip_ratio = max(1, softclip_support_pct / softclip_nonsupport_pct)
+        softclip_penalty = 1 / softclip_ratio # inverse ratio penalty
         
-        # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio))
-        self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
+        support_sec_stats = self.metrics['comparison']['secondary_alignment_stats']
+        nonsupport_sec_stats = self.metrics['comparison']['secondary_alignment_stats_other']
+        support_non_primary_pct = support_sec_stats['pct_non_primary']
+        nonsupport_non_primary_pct = nonsupport_sec_stats['pct_non_primary']
+        
+        support_non_primary_count = support_sec_stats['count_non_primary']
+        support_total = self.metrics['n_support']
+        
+        non_primary_penalty = 1.0
+        
+        # if variant is supported only by secondary/supplementary alignments, drop confidence to 0
+        if support_total > 0 and support_non_primary_count == support_total:
+            self.confidence = 0.0
+            return
+        
+        if support_non_primary_pct > nonsupport_non_primary_pct: # anticipated with low quality variants
+            non_primary_ratio = (support_non_primary_pct + 1) / (nonsupport_non_primary_pct + 1) # prevent dividing by zero
+            non_primary_penalty = 1.0 / non_primary_ratio # inverse ratio penalty
+        
+        weighted_score = max(0, mapq_ratio * softclip_penalty * non_primary_penalty)
+        self.confidence = weighted_score
         
     def to_vcf_record(self) -> str:
         """Convert VariantAnalysis to a VCF line string.
@@ -212,11 +229,42 @@ class VariantAnalysis:
             info.append(f"CONFIDENCE={self.confidence:.2f}")
         
         # Add read group metrics to INFO field if available
+        # TODO: clean up later – this + confidence is exclusive to vesper refine
         if self.metrics and 'comparison' in self.metrics:
             info.append(f"RMAPQ={self.metrics['comparison']['mapq_mean']:.0f}")
-            info.append(f"NSMAPQ={self.metrics['comparison']['mapq_mean_other']:.0f}")
+            info.append(f"NMAPQ={self.metrics['comparison']['mapq_mean_other']:.0f}")
             info.append(f"RSFTCLIP={self.metrics['comparison']['softclip_stats']['pct_softclipped']:.1f}")
             info.append(f"NSFTCLIP={self.metrics['comparison']['softclip_stats_other']['pct_softclipped']:.1f}")
+            
+            sec_stats = self.metrics['comparison']['secondary_alignment_stats']
+            sec_stats_other = self.metrics['comparison']['secondary_alignment_stats_other']
+            
+            info.append(f"RSEC={sec_stats['pct_secondary']:.1f}")
+            info.append(f"RSUPP={sec_stats['pct_supplementary']:.1f}")
+            info.append(f"RNPRIM={sec_stats['pct_non_primary']:.1f}")
+            info.append(f"NSEC={sec_stats_other['pct_secondary']:.1f}")
+            info.append(f"NSUPP={sec_stats_other['pct_supplementary']:.1f}")
+            info.append(f"NNPRIM={sec_stats_other['pct_non_primary']:.1f}")
+            
+            if 'secondary_metrics' in sec_stats and sec_stats['secondary_metrics']:
+                sec_metrics = sec_stats['secondary_metrics']
+                info.append(f"RSEC_MAPQ={sec_metrics['mean_mapq']:.0f}")
+                info.append(f"RSEC_SFTCLP={sec_metrics['soft_clip_stats']['pct_softclipped']:.1f}")
+            
+            if 'supplementary_metrics' in sec_stats and sec_stats['supplementary_metrics']:
+                sup_metrics = sec_stats['supplementary_metrics']
+                info.append(f"RSUPP_MAPQ={sup_metrics['mean_mapq']:.0f}")
+                info.append(f"RSUPP_SFTCLP={sup_metrics['soft_clip_stats']['pct_softclipped']:.1f}")
+                
+            if 'secondary_metrics' in sec_stats_other and sec_stats_other['secondary_metrics']:
+                sec_metrics_other = sec_stats_other['secondary_metrics']
+                info.append(f"NSEC_MAPQ={sec_metrics_other['mean_mapq']:.0f}")
+                info.append(f"NSEC_SFTCLP={sec_metrics_other['soft_clip_stats']['pct_softclipped']:.1f}")
+            
+            if 'supplementary_metrics' in sec_stats_other and sec_stats_other['supplementary_metrics']:
+                sup_metrics_other = sec_stats_other['supplementary_metrics']
+                info.append(f"NSUPP_MAPQ={sup_metrics_other['mean_mapq']:.0f}")
+                info.append(f"NSUPP_SFTCLP={sup_metrics_other['soft_clip_stats']['pct_softclipped']:.1f}")
         
         # Add annotations to INFO field if available
         if self.overlapping_features:
