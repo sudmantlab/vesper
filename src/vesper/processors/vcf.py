@@ -146,7 +146,6 @@ class VCFWriter:
                         break
         else:
             # Create a new header
-            # TODO: Add support for input annotation BED/GFF flattened metadata fields to header, or otherwise specify Type=String
             contigs = set(v.variant.chrom for v in variants)
 
             self.write_header_line(buffer, "fileformat=VCFv4.2")
@@ -165,14 +164,8 @@ class VCFWriter:
             self.write_header_line(buffer, "INFO=<ID=RNAMES,Number=.,Type=String,Description=\"Supporting read names\">")
             self.write_header_line(buffer, "INFO=<ID=RMAPQ,Number=1,Type=Integer,Description=\"Supporting read mapping qualities\">")
             self.write_header_line(buffer, "INFO=<ID=RSFTCLIP,Number=1,Type=Float,Description=\"Supporting read soft-clipping stats\">")
-            self.write_header_line(buffer, "INFO=<ID=NMAPQ,Number=1,Type=Float,Description=\"Nonsupporting read mapping qualities\">")
+            self.write_header_line(buffer, "INFO=<ID=NSMAPQ,Number=1,Type=Float,Description=\"Nonsupporting read mapping qualities\">")
             self.write_header_line(buffer, "INFO=<ID=NSFTCLIP,Number=1,Type=Float,Description=\"Nonsupporting read soft-clipping stats\">")
-            self.write_header_line(buffer, "INFO=<ID=RSEC,Number=1,Type=Float,Description=\"Supporting secondary alignment stats\">")
-            self.write_header_line(buffer, "INFO=<ID=RSUPP,Number=1,Type=Float,Description=\"Supporting supplementary alignment stats\">")
-            self.write_header_line(buffer, "INFO=<ID=RNPRIM,Number=1,Type=Float,Description=\"Supporting non-primary alignment stats\">")
-            self.write_header_line(buffer, "INFO=<ID=NSEC,Number=1,Type=Float,Description=\"Nonsupporting secondary alignment stats\">")
-            self.write_header_line(buffer, "INFO=<ID=NSUPP,Number=1,Type=Float,Description=\"Nonsupporting supplementary alignment stats\">")
-            self.write_header_line(buffer, "INFO=<ID=NNPRIM,Number=1,Type=Float,Description=\"Nonsupporting non-primary alignment stats\">")
             self.write_header_line(buffer, "INFO=<ID=CONFIDENCE,Number=1,Type=Float,Description=\"Confidence score for the variant\">")
             self.write_header_line(buffer, "INFO=<ID=OVERLAPPING,Number=.,Type=String,Description=\"Overlapping annotated features\">")
             self.write_header_line(buffer, "INFO=<ID=PROXIMAL,Number=.,Type=String,Description=\"Proximal annotated features\">")

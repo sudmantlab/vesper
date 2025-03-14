@@ -140,67 +140,6 @@ class ReadGroup:
             for op, count in r.cigar_stats.items():
                 total_cigar_stats[op] = total_cigar_stats.get(op, 0) + count
         return total_cigar_stats
-        
-    @cached_property
-    def secondary_alignment_stats(self) -> Dict[str, float]:
-        """Calculate secondary/supplementary alignment statistics across all reads.
-        
-        Returns:
-            Dictionary containing:
-                - pct_secondary: Percentage of reads that are secondary alignments
-                - pct_supplementary: Percentage of reads that are supplementary alignments
-                - pct_non_primary: Combined percentage of secondary and supplementary alignments
-                - metrics for secondary reads: mapq, soft clipping, etc.
-                - metrics for supplementary reads: mapq, soft clipping, etc.
-        """
-        total_reads = len(self)
-        if total_reads == 0:
-            return {
-                'pct_secondary': 0.0,
-                'pct_supplementary': 0.0,
-                'pct_non_primary': 0.0,
-                'count_secondary': 0,
-                'count_supplementary': 0,
-                'count_non_primary': 0,
-                'secondary_metrics': {},
-                'supplementary_metrics': {}
-            }
-            
-        secondary_reads = [r for r in self.reads if r.is_secondary]
-        supplementary_reads = [r for r in self.reads if r.is_supplementary]
-        
-        secondary_count = len(secondary_reads)
-        supplementary_count = len(supplementary_reads)
-        non_primary_count = secondary_count + supplementary_count
-        
-        secondary_metrics = {}
-        if secondary_count > 0:
-            secondary_group = ReadGroup(secondary_reads)
-            secondary_metrics = {
-                'mean_mapq': secondary_group.mean_mapq,
-                'soft_clip_stats': secondary_group.soft_clip_stats,
-                'cigar_stats': secondary_group.cigar_stats
-            }
-            
-        supplementary_metrics = {}
-        if supplementary_count > 0:
-            supplementary_group = ReadGroup(supplementary_reads)
-            supplementary_metrics = {
-                'mean_mapq': supplementary_group.mean_mapq,
-                'soft_clip_stats': supplementary_group.soft_clip_stats,
-                'cigar_stats': supplementary_group.cigar_stats
-            }
-        
-        return {
-            'pct_secondary': (secondary_count / total_reads) * 100,
-            'pct_supplementary': (supplementary_count / total_reads) * 100,
-            'pct_non_primary': (non_primary_count / total_reads) * 100,
-            'count_secondary': secondary_count,
-            'count_supplementary': supplementary_count,
-            'count_non_primary': non_primary_count,
-            'secondary_metrics': secondary_metrics,
-            'supplementary_metrics': supplementary_metrics
-        }
 
     def compare_stats(self, other: 'ReadGroup') -> Dict[str, float]:
         """Calculate comparison statistics between this read group and another.
@@ -217,7 +156,5 @@ class ReadGroup:
             'softclip_stats': self.soft_clip_stats,
             'softclip_stats_other': other.soft_clip_stats,
             'cigar_stats': self.cigar_stats,
-            'cigar_stats_other': other.cigar_stats,
-            'secondary_alignment_stats': self.secondary_alignment_stats,
-            'secondary_alignment_stats_other': other.secondary_alignment_stats
+            'cigar_stats_other': other.cigar_stats
         }

@@ -22,16 +22,9 @@ class VesperArgumentParser(argparse.ArgumentParser):
     
     def error(self, message):
         """Upon error, prints help message and error."""
+        display_ascii()
         self.print_help()
         self.exit(2, f'\n\033[31mERROR\033[0m: {message}\n')
-        
-    def print_help(self, file=None):
-        super().print_help(file)
-        
-    def format_help(self):
-        """Format help message with ASCII art header."""
-        display_ascii()
-        return super().format_help()
 
 def parse_args():
     """Parse command line arguments."""
@@ -153,6 +146,7 @@ Example:
 
     args, _ = parser.parse_known_args()
     if args.command is None:
+        display_ascii()
         parser.print_help()
         sys.exit(0)
 
