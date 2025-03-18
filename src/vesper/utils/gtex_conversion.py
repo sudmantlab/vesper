@@ -1,16 +1,33 @@
 #!/usr/bin/env python3
 
 """
-Script to combine GENCODE GFF3 annotations with GTEx expression data into a BED format file.
-The script matches genes based on Ensembl IDs (stripped of version numbers) and combines
-positional information from GFF3 with expression data from GTEx.
+Script to add GTEx expression data as attributes to GENCODE GFF3 annotations.
+The script matches genes based on Ensembl IDs (stripped of version numbers) and adds
+expression data for selected tissues as GFF attributes in the form gtex_{tissue}: {value}.
 """
 
 import argparse
 import gzip
 import csv
 import re
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Set
+
+def normalize_tissue_name(tissue: str) -> str:
+    """
+    Normalize tissue name by:
+    1. Converting to lowercase
+    2. Replacing non-letter chars with underscores
+    3. Collapsing multiple sequential underscores
+    """
+    # Convert to lowercase
+    tissue = tissue.lower()
+    # Replace non-letter chars with underscore
+    tissue = re.sub(r'[^a-z]+', '_', tissue)
+    # Collapse multiple sequential underscores
+    tissue = re.sub(r'_+', '_', tissue)
+    # Remove leading/trailing underscores
+    tissue = tissue.strip('_')
+    return tissue
 
 def strip_version(ensembl_id: str) -> str:
     """Remove version number from Ensembl ID."""
@@ -25,98 +42,98 @@ def parse_gff_info(info_field: str) -> Dict[str, str]:
             info_dict[key] = value
     return info_dict
 
-def process_gff(gff_file: str) -> Dict[str, Tuple[str, int, int, str]]:
-    """
-    Process GFF3 file and extract gene information.
-    Returns dict mapping stripped Ensembl ID to (chromosome, start, end, gene_name).
-    Only processes gene features.
-    """
-    gene_info = {}
-    with gzip.open(gff_file, 'rt') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            
-            fields = line.strip().split('\t')
-            if len(fields) != 9 or fields[2] != 'gene':
-                continue
-                
-            chrom = fields[0]
-            start = int(fields[3])
-            end = int(fields[4])
-            info = parse_gff_info(fields[8])
-            
-            # Extract Ensembl ID and gene name
-            ensembl_id = info.get('ID', '')
-            if not ensembl_id:
-                continue
-                
-            stripped_id = strip_version(ensembl_id)
-            gene_name = info.get('gene_name', stripped_id)
-            
-            gene_info[stripped_id] = (chrom, start, end, gene_name)
-    
-    return gene_info
+def format_gff_info(info_dict: Dict[str, str]) -> str:
+    """Format dictionary back into GFF3 info field string."""
+    return ';'.join(f"{key}={value}" for key, value in info_dict.items())
 
-def process_gtex(gtex_file: str) -> Tuple[List[str], Dict[str, List[float]]]:
+def process_gtex(gtex_file: str, selected_tissues: Set[str]) -> Tuple[Dict[str, int], Dict[str, Dict[str, float]]]:
     """
-    Process GTEx file and extract expression data.
-    Returns tuple of (tissue_names, expression_data_dict).
-    Expression data dict maps stripped Ensembl ID to list of expression values.
+    Process GTEx file and extract expression data for selected tissues.
+    Returns:
+    - Dict mapping normalized tissue name to its column index
+    - Dict mapping stripped Ensembl ID to dict of {normalized_tissue: expression_value}
     """
+    tissue_indices = {}
     expression_data = {}
-    tissue_names = []
     
     with open(gtex_file, 'r') as f:
         # Skip version and dimensions lines
         f.readline()
         f.readline()
         
-        # Read header
+        # Read header and find indices of selected tissues
         header = f.readline().strip().split('\t')
-        tissue_names = header[2:]  # Skip Name and Description columns
+        for i, tissue in enumerate(header[2:], 2):  # Start from 2 to account for Name and Description
+            norm_tissue = normalize_tissue_name(tissue)
+            if norm_tissue in selected_tissues:
+                tissue_indices[norm_tissue] = i
         
         # Read expression data
         for line in f:
             fields = line.strip().split('\t')
             ensembl_id = strip_version(fields[0])
-            expression_values = [float(x) if x != '' else 0.0 for x in fields[2:]]
-            expression_data[ensembl_id] = expression_values
+            
+            # Create dict of tissue:expression for this gene
+            gene_expression = {}
+            for norm_tissue, idx in tissue_indices.items():
+                try:
+                    value = float(fields[idx]) if fields[idx] else 0.0
+                    gene_expression[norm_tissue] = value
+                except (IndexError, ValueError):
+                    gene_expression[norm_tissue] = 0.0
+            
+            expression_data[ensembl_id] = gene_expression
     
-    return tissue_names, expression_data
+    return tissue_indices, expression_data
 
 def main():
-    parser = argparse.ArgumentParser(description='Combine GENCODE GFF3 and GTEx data into BED format')
+    parser = argparse.ArgumentParser(description='Add GTEx expression data as attributes to GENCODE GFF3')
     parser.add_argument('gff_file', help='Input GENCODE GFF3 file (gzipped)')
     parser.add_argument('gtex_file', help='Input GTEx expression file')
-    parser.add_argument('output_file', help='Output BED file')
+    parser.add_argument('output_file', help='Output GFF3 file (will be gzipped)')
+    parser.add_argument('--tissues', nargs='+', required=True,
+                      help='One or more tissue names to include from GTEx data')
     args = parser.parse_args()
 
-    # Process input files
-    gene_info = process_gff(args.gff_file)
-    tissue_names, expression_data = process_gtex(args.gtex_file)
+    # Normalize selected tissue names
+    selected_tissues = {normalize_tissue_name(t) for t in args.tissues}
     
-    # Write output BED file
-    with open(args.output_file, 'w') as f:
-        # Write header
-        header = ['#chrom', 'start', 'end', 'ensembl_id', 'gene_name'] + tissue_names
-        f.write('\t'.join(header) + '\n')
-        
-        # Write data
-        for ensembl_id in sorted(gene_info.keys()):
-            if ensembl_id in expression_data:
-                chrom, start, end, gene_name = gene_info[ensembl_id]
-                expression_values = expression_data[ensembl_id]
+    # Process GTEx file to get expression data for selected tissues
+    tissue_indices, expression_data = process_gtex(args.gtex_file, selected_tissues)
+    
+    # Process GFF file and add expression data
+    with gzip.open(args.gff_file, 'rt') as fin, gzip.open(args.output_file, 'wt') as fout:
+        for line in fin:
+            if line.startswith('#'):
+                fout.write(line)
+                continue
+            
+            fields = line.strip().split('\t')
+            if len(fields) != 9:
+                fout.write(line)
+                continue
+            
+            # Parse info field
+            info_dict = parse_gff_info(fields[8])
+            ensembl_id = info_dict.get('ID', '')
+            if not ensembl_id:
+                fout.write(line)
+                continue
+            
+            # Get stripped version for matching
+            stripped_id = strip_version(ensembl_id)
+            
+            # If this gene has expression data and it's a gene feature, add it
+            if stripped_id in expression_data and fields[2] == 'gene':
+                gene_expression = expression_data[stripped_id]
+                for tissue, value in gene_expression.items():
+                    info_dict[f'gtex_{tissue}'] = f'{value:.6f}'
                 
-                output_fields = [
-                    chrom,
-                    str(start),
-                    str(end),
-                    ensembl_id,
-                    gene_name
-                ] + [str(x) for x in expression_values]
-                
-                f.write('\t'.join(output_fields) + '\n')
+                # Update info field with new attributes
+                fields[8] = format_gff_info(info_dict)
+                fout.write('\t'.join(fields) + '\n')
+            else:
+                fout.write(line)
 
 if __name__ == '__main__':
     main() 

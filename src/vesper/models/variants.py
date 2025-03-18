@@ -5,6 +5,7 @@ import numpy as np
 from enum import Enum, auto
 import pysam
 import logging
+import json
 
 from ..processors.annotations import GenomicInterval
 from .reads import AlignedRead, ReadGroup
@@ -80,10 +81,12 @@ class Variant:
             
             info_dict = {}
             for key, value in record.info.items():
-                if isinstance(value, tuple): 
+                if key == 'OVERLAPPING' or key == 'PROXIMAL':
+                    info_dict[key] = ','.join(value) # reconstruct json string
+                elif isinstance(value, tuple): 
                     info_dict[key] = list(value)
                 else:
-                    info_dict[key] = value
+                    info_dict[key] = str(value)
             
             # TODO: unlikely to be needed given single sample processing, but keep and review later
             sample_dicts = []
@@ -137,6 +140,12 @@ class VariantAnalysis:
     confidence: Optional[float] = None
     logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
+    def __post_init__(self):
+        if 'OVERLAPPING' in self.variant.info:
+            self.overlapping_features = [GenomicInterval.from_json(record) for record in json.loads(self.variant.info['OVERLAPPING'])]
+        if 'PROXIMAL' in self.variant.info:
+            self.proximal_features = [GenomicInterval.from_json(record) for record in json.loads(self.variant.info['PROXIMAL'])]
+
     def __repr__(self) -> str:
         return (f"\n{self.variant},\nconfidence={self.confidence},\nsupport_reads={len(self.support_reads)},\n"
                 f"nonsupport_reads={len(self.nonsupport_reads)},\n"
@@ -166,6 +175,7 @@ class VariantAnalysis:
         Should be called after _calculate_grouped_metrics() and adding annotations.
         """
         if not self.metrics:
+            self.logger.warning(f"Missing metrics for variant {self.variant.ID}, skipping confidence calculation")
             self.confidence = 0.0
             return
             
@@ -178,9 +188,16 @@ class VariantAnalysis:
         support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
         nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
         softclip_ratio = max(1, support_pct / nonsupport_pct)
+
+        # TODO: placeholder check for GTEx annotations in overlapping or proximal features
+        gtex_multiplier = 1.0
+        for feature in self.overlapping_features + self.proximal_features:
+            if any('gtex' in str(v).lower() for v in feature.metadata.values()):
+                gtex_multiplier = 1.2
+                break
         
         # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio))
+        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier)
         self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
         
     def to_vcf_record(self) -> str:
@@ -223,19 +240,17 @@ class VariantAnalysis:
             overlapping = []
             for interval in self.overlapping_features:
                 if isinstance(interval, GenomicInterval):
-                    flattened = interval.to_dict()
-                    overlapping.append(str(flattened))
+                    overlapping.append(interval.to_dict())
             if overlapping:
-                info.append(f"OVERLAPPING={','.join(overlapping)}")
+                info.append(f"OVERLAPPING={json.dumps(overlapping)}")
 
         if self.proximal_features:
             proximal = []
             for interval in self.proximal_features:
                 if isinstance(interval, GenomicInterval):
-                    flattened = interval.to_dict()
-                    proximal.append(str(flattened))
+                    proximal.append(interval.to_dict())
             if proximal:
-                info.append(f"PROXIMAL={','.join(proximal)}")
+                info.append(f"PROXIMAL={json.dumps(proximal)}")
                 
         info_field = ";".join(info) 
     

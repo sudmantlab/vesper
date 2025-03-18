@@ -9,6 +9,7 @@ import os
 import time
 import gzip
 from concurrent.futures import ThreadPoolExecutor
+import json
 
 
 @dataclass
@@ -46,6 +47,22 @@ class GenomicInterval:
         if self.metadata:
             result.update(self.metadata)      
         return result
+    
+    @staticmethod
+    def from_json(json_record):
+        """Convert json string/dict to GenomicInterval."""
+        if isinstance(json_record, dict):
+            loaded = json_record
+        else: # string
+            loaded = json.loads(json_record)
+        metadata = {k: v for k, v in loaded.items() if k not in ['source', 'chrom', 'start', 'end', 'length']}
+        return GenomicInterval(
+            source=loaded['source'],
+            chrom=loaded['chrom'],
+            start=loaded['start'],
+            end=loaded['end'],
+            metadata=metadata
+        )
 
 class AnnotationProcessor(ABC):
     """Base class for processing genomic annotation files."""
@@ -131,13 +148,17 @@ class AnnotationProcessor(ABC):
         
         cursor = conn.execute(query, (chrom, pos, pos))
         
-        return [GenomicInterval(
-            source=self.source_name,
-            chrom=row['chrom'],
-            start=row['start'],
-            end=row['end'],
-            metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end')}
-        ) for row in cursor.fetchall()]
+        results = []
+        for row in cursor.fetchall():
+            metadata = json.loads(row['metadata']) if 'metadata' in row.keys() else {}
+            results.append(GenomicInterval(
+                source=self.source_name,
+                chrom=row['chrom'],
+                start=row['start'],
+                end=row['end'],
+                metadata=metadata
+            ))
+        return results
 
     def find_proximal(self, chrom: str, pos: int, span: int = 100) -> List[GenomicInterval]:
         """Find features within span distance of the position.
@@ -166,13 +187,18 @@ class AnnotationProcessor(ABC):
         
         cursor = conn.execute(query, (pos, pos, chrom, start, end, start, end))
         
-        return [GenomicInterval(
-            source=self.source_name,
-            chrom=row['chrom'],
-            start=row['start'],
-            end=row['end'],
-            metadata={k: row[k] for k in row.keys() if k not in ('chrom', 'start', 'end', 'distance')}
-        ) for row in cursor.fetchall()]
+        results = []
+        for row in cursor.fetchall():
+            metadata = json.loads(row['metadata']) if 'metadata' in row.keys() else {}
+            metadata['distance'] = row['distance']  # Add distance to metadata
+            results.append(GenomicInterval(
+                source=self.source_name,
+                chrom=row['chrom'],
+                start=row['start'],
+                end=row['end'],
+                metadata=metadata
+            ))
+        return results
     
     def _annotate_variant(self, variant, proximal_span) -> None:
         """Annotate a single variant."""
@@ -210,6 +236,9 @@ class BEDProcessor(AnnotationProcessor):
             
         Returns:
             Self for method chaining
+            
+        Raises:
+            ValueError: If a BED field is empty when higher-numbered fields are present
         """
         if self.db_path is None:
             self.db_path = self.filepath.with_suffix(self.filepath.suffix + '.sqlite')
@@ -235,14 +264,13 @@ class BEDProcessor(AnnotationProcessor):
         # Drop existing table if rebuilding
         conn.execute('DROP TABLE IF EXISTS intervals')
         
+        # Create table with only mandatory fields plus metadata JSON
         conn.execute('''
             CREATE TABLE intervals (
                 chrom TEXT,
                 start INTEGER,
                 end INTEGER,
-                name TEXT,
-                score REAL,
-                strand TEXT
+                metadata TEXT  -- JSON field for all optional columns
             )
         ''')
         conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
@@ -259,37 +287,58 @@ class BEDProcessor(AnnotationProcessor):
             mode = 'r'
 
         with file_opener(self.filepath, mode) as f:
-            for i, line in enumerate(f):
+            for i, line in enumerate(f, start=1):  # 1-based line counting for error messages
                 if line.startswith('#') or not line.strip():
                     continue
                     
                 fields = line.strip().split('\t')
-                if len(fields) < 3:
-                    continue
+                if len(fields) < 3: # BED requires 3 fields
+                    raise ValueError(f"Line {i}: BED format requires at least 3 fields, found {len(fields)}")
+                    
+                for idx, field in enumerate(fields[:3]):
+                    if not field.strip():
+                        raise ValueError(f"Line {i}: Mandatory BED field {idx+1} is empty")
                     
                 # Convert BED's 0-based to 1-based for consistency with VCF
                 chrom = fields[0].strip(' ')
-                start = int(fields[1]) + 1  # Convert to 1-based
+                start = int(fields[1]) + 1
                 end = int(fields[2])
-                name = fields[3] if len(fields) > 3 else None
-                score = float(fields[4]) if len(fields) > 4 and fields[4] != '.' else None
-                strand = fields[5] if len(fields) > 5 else None
                 
-                batch.append((chrom, start, end, name, score, strand))
+                optional = {3: ('name', str), 
+                            4: ('score', int), 
+                            5: ('strand', str), 
+                            6: ('thickStart', int), 
+                            7: ('thickEnd', int), 
+                            8: ('itemRgb', str), 
+                            9: ('blockCount', int), 
+                            10: ('blockSizes', str), 
+                            11: ('blockStarts', str)}
+                metadata = {}
+      
+                for idx, value in enumerate(fields[3:], start=3):
+                    if value == '': 
+                        value = "." # placeholder/empty sub
+                    elif idx <= 12:
+                        metadata[optional[idx][0]] = optional[idx][1](value)
+                    metadata[f'field{idx}'] = str(value) # cast generic name/value pairs as strings
+                    
+                metadata_json = json.dumps(metadata) if metadata else '{}'
+                
+                batch.append((chrom, start, end, metadata_json))
                 
                 if len(batch) >= batch_size:
                     conn.executemany(
-                        'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO intervals VALUES (?, ?, ?, ?)',
                         batch
                     )
                     conn.commit()
                     batch = []
-                    self.logger.info(f"Processed {i+1:,} lines...")
+                    self.logger.info(f"Processed {i:,} lines...")
             
             # Insert remaining records
             if batch:
                 conn.executemany(
-                    'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO intervals VALUES (?, ?, ?, ?)',
                     batch
                 )
                 conn.commit()
@@ -309,6 +358,9 @@ class GFFProcessor(AnnotationProcessor):
             
         Returns:
             Self for method chaining
+            
+        Raises:
+            ValueError: If a GFF field is empty or malformed
         """
         if self.db_path is None:
             self.db_path = self.filepath.with_suffix(self.filepath.suffix + '.sqlite')
@@ -339,16 +391,11 @@ class GFFProcessor(AnnotationProcessor):
                 chrom TEXT,
                 start INTEGER,
                 end INTEGER,
-                name TEXT,
-                score REAL,
-                strand TEXT,
-                feature_type TEXT,
-                attributes TEXT
+                metadata TEXT  -- JSON field for all optional columns
             )
         ''')
         conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
         conn.execute('CREATE INDEX idx_chrom_end ON intervals (chrom, end)')
-        conn.execute('CREATE INDEX idx_feature_type ON intervals (feature_type)')
 
         self.logger.info(f"Indexing {self.filepath}...")
         batch = []
@@ -361,28 +408,36 @@ class GFFProcessor(AnnotationProcessor):
             mode = 'r'
 
         with file_opener(self.filepath, mode) as f:
-            for i, line in enumerate(f):
+            for i, line in enumerate(f, start=1):  # 1-based line counting for error messages
                 if line.startswith('#') or not line.strip():
                     continue
                     
                 fields = line.strip().split('\t')
                 if len(fields) < 9:  # GFF requires 9 fields
-                    continue
+                    raise ValueError(f"Line {i}: GFF format requires 9 fields, found {len(fields)}")
              
-                # GFFs are already 1-based
-                chrom = fields[0].strip()
-                source = fields[1].strip() 
-                feature = fields[2].strip()
-                start = int(fields[3])
-                end = int(fields[4])
-                score = float(fields[5]) if fields[5] != '.' else None
-                strand = fields[6]
-                frame = fields[7]
-
-                # Parse attributes into key-value pairs
-                attributes = fields[8].strip() if len(fields) > 8 else ""
-                attributes_dict = {}
+                for idx, field in enumerate(fields[:3]):
+                    if not field.strip():
+                        raise ValueError(f"Line {i}: Mandatory GFF field {idx+1} is empty")
                 
+                chrom = fields[0].strip(' ')
+                
+                try:
+                    start = int(fields[3])
+                    end = int(fields[4])
+                except ValueError:
+                    raise ValueError(f"Line {i}: Invalid start/end coordinates: {fields[3]}, {fields[4]}")
+                
+                # write all non-mandatory fields into metadata json
+                metadata = {
+                    'source': fields[1].strip(),
+                    'feature_type': fields[2].strip(),
+                    'score': None if fields[5] == '.' else float(fields[5]),
+                    'strand': fields[6],
+                    'frame': fields[7]
+                }
+
+                attributes = fields[8].strip()
                 if attributes:
                     parts = attributes.split(';')
                     for part in parts:
@@ -390,27 +445,30 @@ class GFFProcessor(AnnotationProcessor):
                             continue
                         if '=' in part:
                             key, value = part.split('=', 1)
-                            attributes_dict[key.strip()] = value.strip()
+                            metadata[key.strip()] = value.strip()
                 
-                # Extract ID or Name as the name field
-                name = attributes_dict.get('ID', attributes_dict.get('Name', feature))
+                for idx, value in enumerate(fields[9:], start=1):
+                    if value == '':
+                        value = "." # placeholder/empty sub
+                    metadata[f'field{idx}'] = str(value) # cast generic name/value pairs as strings
                 
-                # Store key attributes and the whole attribute string
-                batch.append((chrom, start, end, name, score, strand, feature, attributes))
+                metadata_json = json.dumps(metadata)
+                
+                batch.append((chrom, start, end, metadata_json))
                 
                 if len(batch) >= batch_size:
                     conn.executemany(
-                        'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        'INSERT INTO intervals VALUES (?, ?, ?, ?)',
                         batch
                     )
                     conn.commit()
                     batch = []
-                    self.logger.info(f"Processed {i+1:,} lines...")
+                    self.logger.info(f"Processed {i:,} lines...")
             
             # Insert remaining records
             if batch:
                 conn.executemany(
-                    'INSERT INTO intervals VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO intervals VALUES (?, ?, ?, ?)',
                     batch
                 )
                 conn.commit()
