@@ -1,0 +1,20 @@
+name: vesper
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - pip
+  - uv
+  - python==3.12.8
+  - numpy
+  - pandas
+  - pydantic
+  - pytest
+  - pysam
+  - rich
+  - rich-argparse
+  - annotated-types
+  - typing-extensions
+  - repeatmasker
+  - trf
+  - rmblast

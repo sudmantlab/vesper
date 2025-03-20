@@ -10,23 +10,29 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 from vesper.processors.vcf import VCFProcessor, VCFWriter
 from vesper.processors.annotations import BEDProcessor, GFFProcessor
+from vesper.processors.repeatmasker import RepeatMaskerProcessor
 from vesper.utils.config import AnnotateConfig
 
-def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
+def process_annotate_chunk(variants: list, annotation_procs: list, repeatmasker_proc: RepeatMaskerProcessor, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
     """Process a chunk of variants through the annotation pipeline with multiple annotation processors.
     
     Args:
         variants: List of variants to process
         annotation_procs: List of AnnotationProcessor instances (BED or GFF)
+        repeatmasker_proc: RepeatMasker processor instance
         chunk_idx: Index of this chunk for logging
         proximal_span: Distance (+/-) to search for proximal features
         logger: Logger instance
     """
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
     
+    # Apply overlapping/proximal annotations first
     for variant in variants:
         for proc in annotation_procs:
             proc._annotate_variant(variant, proximal_span=proximal_span)
+            
+    # Process insertion sequences with RepeatMasker
+    repeatmasker_proc.process_batch(variants)
     
     logger.info(f"Completed annotation chunk {chunk_idx}")
 
@@ -95,7 +101,7 @@ def run_annotate(args, logger):
             logger.info(f"Loading GFF file: {gff_file.name} as '{gff_name}'")
             annotation_procs.append(GFFProcessor(gff_file, source_name=gff_name))
             progress.update(task, advance=1)
-            
+
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
                  TaskProgressColumn(),
@@ -103,9 +109,11 @@ def run_annotate(args, logger):
                  TimeRemainingColumn()) as progress, \
          ThreadPoolExecutor(max_workers=n_workers) as executor:
         
-        # Open all annotation processors using context managers
+        # Open all processors using context managers
         for proc in annotation_procs:
             proc.__enter__()
+        repeatmasker_proc = RepeatMaskerProcessor(config.output_dir)
+        repeatmasker_proc.__enter__()
         
         try:
             task = progress.add_task("[cyan]Annotating variants...", total=len(variants))           
@@ -115,6 +123,7 @@ def run_annotate(args, logger):
                     process_annotate_chunk, 
                     chunk, 
                     annotation_procs,
+                    repeatmasker_proc,
                     idx,
                     config.proximal_span,
                     logger
@@ -135,6 +144,7 @@ def run_annotate(args, logger):
         finally:
             for proc in annotation_procs:
                 proc.__exit__(None, None, None)
+            repeatmasker_proc.__exit__(None, None, None)
     
     elapsed = time.time() - start_time
     logger.info(f"Completed annotation in {elapsed:.2f} seconds")

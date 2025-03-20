@@ -132,13 +132,15 @@ class Variant:
 class VariantAnalysis:
     """Mutable wrapper object for variant analysis and annotation."""
     variant: Variant
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
     support_reads: ReadGroup = field(default_factory=lambda: ReadGroup([]))
     nonsupport_reads: ReadGroup = field(default_factory=lambda: ReadGroup([]))
     metrics: Dict[str, Any] = field(default_factory=dict)
+
     overlapping_features: List[GenomicInterval] = field(default_factory=list)
     proximal_features: List[GenomicInterval] = field(default_factory=list)
+    repeatmasker_results: List[Dict[str, Any]] = field(default_factory=list)
     confidence: Optional[float] = None
-    logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
 
     def __post_init__(self):
         if 'OVERLAPPING' in self.variant.info:

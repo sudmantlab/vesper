@@ -1,0 +1,313 @@
+"""Module for handling RepeatMasker processing for insertion sequences."""
+
+import os
+import re
+import subprocess
+import logging
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+import shutil
+import tempfile
+import uuid
+
+from ..models.variants import VariantAnalysis
+
+
+class RepeatMaskerProcessor:
+    """Process insertion sequences using RepeatMasker.
+    
+    This processor extracts insertion sequences from VariantAnalysis objects and
+    runs RepeatMasker to identify repeat elements. Uses temporary directories
+    for batch processing to avoid collisions during multithreading.
+    """
+    
+    def __init__(self, output_dir: Path):
+        """Initialize the RepeatMasker processor.
+        
+        Args:
+            output_dir: Base output directory path
+        """
+        self.logger = logging.getLogger(__name__)
+        self.output_dir = output_dir
+        self.repeatmasker_dir = output_dir / "repeatmasker"
+        self.current_temp_dir = None
+        
+        if not self.repeatmasker_dir.exists():
+            self.repeatmasker_dir.mkdir(parents=True)
+            self.logger.info(f"Created RepeatMasker output directory: {self.repeatmasker_dir}")
+    
+    def __enter__(self):
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._cleanup_temp_dir()
+        
+    def _create_temp_dir(self) -> Path:
+        """Create a temporary directory for batch processing.
+        
+        Returns:
+            Path to temporary directory
+        """
+        self._cleanup_temp_dir() # redundant enforcement to ensure no collisions
+        
+        self.current_temp_dir = self.repeatmasker_dir / f"batch_{uuid.uuid4().hex[:8]}"
+        self.current_temp_dir.mkdir(parents=True)
+        return self.current_temp_dir
+    
+    def _cleanup_temp_dir(self) -> None:
+        """Clean up the current temporary directory."""
+        if self.current_temp_dir and self.current_temp_dir.exists():
+            shutil.rmtree(self.current_temp_dir)
+            self.logger.debug(f"Cleaned up temporary directory: {self.current_temp_dir}")
+            self.current_temp_dir = None
+    
+    def _write_insertion_fasta(self, variants: List[VariantAnalysis], temp_dir: Path) -> Path:
+        """Extract insertion sequences to FASTA file. 
+        Each insertion sequence is written as a separate record in the FASTA file,
+        using the variant ID as the record header.
+        
+        Args:
+            variants: List of VariantAnalysis objects to process
+            temp_dir: Temporary directory for the batch processing
+        
+        Returns:
+            Path to the created FASTA file
+        """
+        insertion_count = 0
+        
+        fasta_path = temp_dir / "insertions.fa"
+        with open(fasta_path, 'w') as fasta_file:
+            for v in variants:
+                alt = v.variant.alt
+                if alt not in ["N", ".", "<INS>"]:
+                    fasta_file.write(f">{v.variant.ID}\n")
+                    fasta_file.write(f"{alt}\n")
+                    insertion_count += 1
+        
+        self.logger.info(f"Wrote {insertion_count} insertion sequences to {fasta_path}")
+        return fasta_path
+    
+    def _run_repeatmasker(self, fasta_path: Path, temp_dir: Path) -> None:
+        """Run RepeatMasker on a batch of insertion sequences.
+        
+        Args:
+            fasta_path: Path to the batch insertion sequences FASTA file
+            temp_dir: Temporary directory for the batch processing
+        """
+        if not fasta_path.exists():
+            raise FileNotFoundError(f"Insertion FASTA file not found: {fasta_path}")
+        
+        command = [
+            "RepeatMasker",
+            "-engine", "rmblast",
+            "-nocut",
+            "-gff",
+            "-species", "human",
+            "-dir", str(temp_dir),
+            str(fasta_path)
+        ]
+        
+        self.logger.info(f"Running RepeatMasker: {' '.join(command)}")
+        
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            self.logger.debug(f"RepeatMasker output: {result.stdout}")
+            self.logger.info("RepeatMasker completed successfully")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"RepeatMasker failed: {e.stderr}")
+            raise RuntimeError(f"RepeatMasker failed: {e.stderr}")
+        except FileNotFoundError:
+            self.logger.error("RepeatMasker executable not found. Make sure it's installed and in your PATH.")
+            raise RuntimeError("RepeatMasker executable not found. Make sure it's installed and in your PATH.")
+        
+        expected_files = [
+            fasta_path.with_suffix(".fa.out"),
+            fasta_path.with_suffix(".fa.tbl"),
+            fasta_path.with_suffix(".fa.cat.gz"),
+            fasta_path.with_suffix(".fa.masked"),
+            fasta_path.with_suffix(".fa.out.gff")
+        ]
+        
+        missing_files = [f for f in expected_files if not f.exists()]
+        
+        if missing_files:
+            self.logger.warning(f"Missing expected RepeatMasker output files: {', '.join(str(f) for f in missing_files)}")
+
+    def _parse_output(self, temp_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
+        """Parse a RepeatMasker .out file and return all annotations.
+        
+        Args:
+            temp_dir: Temporary directory for the batch processing
+                
+        Returns:
+            Dictionary mapping sequence IDs to repeat annotations
+        """
+        outfile = temp_dir / "insertions.fa.out"
+        if not outfile.exists():
+            raise FileNotFoundError(f"RepeatMasker output file not found: {outfile}")
+        
+        results = {}
+        
+        with open(outfile, 'r') as f:
+            for line in f: # skip header
+                if "score" in line.lower():
+                    break
+            next(f, None)
+            
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                try:
+                    # note and remove trailing asterisks (doc info below)
+                    # asterisk (*) in the final column = annotation partially overlaps a higher-scoring match (<80%)
+                    # flag as a secondary annotation
+                    overlap_check = False
+                    if line.endswith('*'):
+                        line = line[:-1].strip()
+                        overlap_check = True
+                    fields = re.split(r'\s+', line.strip())
+                    if not fields or len(fields) < 14:
+                        self.logger.warning(f"Skipping invalid line (not enough fields): {line}")
+                        continue
+                    
+                    sw_score = int(fields[0])
+                    perc_div = float(fields[1])
+                    perc_del = float(fields[2])
+                    perc_ins = float(fields[3])
+                    query_name = fields[4]
+                    query_begin = int(fields[5])
+                    query_end = int(fields[6])
+                    query_left_raw = fields[7]
+                    query_left = int(query_left_raw.strip('()')) if query_left_raw.strip('()').isdigit() else 0 # ex. (100) -> 100
+                    strand = fields[8]
+                    
+                    # begin annoying repeat class/family parsing
+                    repeat_name = fields[9]
+                    repeat_class = None
+                    position_shift = 0
+                    
+                    # look for class/family field in the next 3 fields
+                    # easiest detection: repeat class/family indicated by slash for many categories
+                    for i in range(10, min(13, len(fields))):
+                        if '/' in fields[i]: # ex. LTR/ERVL, Retroposon/SVA, LINE/L1...
+                            repeat_class = fields[i]
+                            position_shift = i - 10 + 1 
+                            break
+                    
+                    # if not found, likely Simple_repeat, Low_complexity, etc...
+                    # we then have an extra field that's not part of position-in-repeat coordinates
+                    if repeat_class is None and len(fields) > 14 and not all(f.strip('()').isdigit() for f in fields[10:13]):
+                        repeat_class = fields[10]
+                        position_shift = 1
+                    
+                    # adjust field index for parsing remaining fields based on position_shift
+                    repeat_start_idx = 10 + position_shift
+                    
+                    if repeat_start_idx + 2 >= len(fields):
+                        self.logger.warning(f"Skipping invalid line (can't locate position-in-repeat fields): {line}")
+                        continue
+                    
+                    # finally, parse the position-in-repeat fields (next three after the adjusted index)
+                    repeat_start_raw = fields[repeat_start_idx]
+                    repeat_start = int(repeat_start_raw.strip('()')) if repeat_start_raw.strip('()').isdigit() else 0
+                    
+                    repeat_end = int(fields[repeat_start_idx+1])
+                    
+                    repeat_left_raw = fields[repeat_start_idx+2]
+                    repeat_left = int(repeat_left_raw.strip('()')) if repeat_left_raw.strip('()').isdigit() else 0
+                    
+                    result = {
+                        'score': sw_score,
+                        'divergence': perc_div,
+                        'deletion': perc_del,
+                        'insertion': perc_ins,
+                        'query_start': query_begin, # ex. if 1, then the match started at the first base of the insertion sequence
+                        'query_end': query_end,
+                        'query_left': query_left, # remaining bases of the insertion sequence that are not part of the match
+                        'strand': strand,
+                        'repeat_name': repeat_name,
+                        'repeat_class': repeat_class,
+                        'repeat_start': repeat_start,
+                        'repeat_end': repeat_end,
+                        'repeat_left': repeat_left,
+                        'match_length': query_end - query_begin + 1,
+                        'match_coverage': (query_end - query_begin + 1) / (query_end + query_left), # ex. 100% coverage if the whole insertion sequence is matched
+                        'is_secondary': overlap_check
+                    }
+                    
+                    if query_name not in results:
+                        results[query_name] = []
+                    results[query_name].append(result)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error parsing line: {line}. Error: {e}")
+                    continue
+        
+        return results
+    
+    def _parse_and_simplify(self, temp_dir: Path) -> Dict[str, Dict[str, Any]]:
+        """For each query sequence, returns only the top-scoring annotation.
+        
+        Args:
+            temp_dir: Path to the directory containing RepeatMasker output files
+            
+        Returns:
+            Dictionary mapping sequence IDs to their best repeat annotation
+        """
+        all_results = self._parse_output(temp_dir)
+        simplified = {}
+        
+        for query_name, annotations in all_results.items():
+            if not annotations:
+                continue
+                
+            sorted_annotations = sorted(annotations, key=lambda x: x['score'], reverse=True)
+            best_hit = sorted_annotations[0]
+            
+            simplified[query_name] = best_hit
+        
+        return simplified
+    
+    def batch_analysis(self, variants: List[VariantAnalysis]) -> None:
+        """Analyze a batch of variants with RepeatMasker.
+        
+        Args:
+            variants: List of variants to analyze
+        """
+        if not variants:
+            return
+            
+        temp_dir = self._create_temp_dir()
+        try:
+            fasta_path = self._write_insertion_fasta(variants, temp_dir)
+            self._run_repeatmasker(fasta_path, temp_dir)
+            
+            # Parse results (full details)
+            detailed_results = self._parse_output(temp_dir)
+            
+            # Get simplified results (best hit only)
+            simplified_results = self._parse_and_simplify(temp_dir)
+            
+            # Update variant objects with results
+            for variant in variants:
+                var_id = variant.variant.ID
+                if var_id in detailed_results:
+                    variant.repeatmasker_results = {
+                        'detailed': detailed_results[var_id],
+                        'summary': simplified_results.get(var_id)
+                    }
+                    
+            self.logger.info(f"Processed {len(variants)} variants through RepeatMasker, {len(detailed_results)} results found")
+        except Exception as e:
+            self.logger.error(f"Error processing variants with RepeatMasker: {e}")
+            raise e
+        finally:
+            self._cleanup_temp_dir()

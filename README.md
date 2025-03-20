@@ -63,6 +63,37 @@ uv pip install -e ".[dev]"
 
 `requirements.txt` is generated via `pip freeze > requirements.txt` for noting specific versions in the most recent functional build and can also be used to install dependencies.
 
+### Option 2: Using conda
+
+#TODO: Fix overlapping dependency specifications in `environment.yml` and `pyproject.toml`.
+
+1. Directly create and install the environment from `environment.yml`:
+```bash
+conda env create -f environment.yml
+```
+
+*Note*: This environment should build without any issues on Linux and osx-64. However, not all packages are compiled for osx-arm64 (Apple Silicon): if you are using an M-series Mac, you can use the `--subdir` option to emulate osx-64:
+
+```bash
+conda env create -f environment.yml --subdir osx-64
+```
+
+2. Activate the environment:
+```bash
+conda activate vesper
+```
+
+3. Install `vesper` via `pip` or `uv`:
+```bash
+# pip
+pip install -e ".[dev]"
+
+# uv
+uv pip install -e ".[dev]"
+```
+
+`environment-list.txt` is generated via `conda env export > environment-list.txt` and can be used to re-create the environment with hard pins.
+
 ## Testing
 
 After setting up either environment, you can run tests with:
