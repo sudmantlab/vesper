@@ -57,6 +57,9 @@ Example:
                             help="fastq/fastq.gz file for alignment (required)")
     call_parser.add_argument("--output-dir", "-o", required=True,
                             help="Output directory (required)")
+    call_parser.add_argument("--threads", "-t", 
+                            default="8",
+                            help="Number of threads to use (integer or 'auto', default: 8)")
     call_parser.add_argument("--logging",
                             help="Log directory (default: output/logs)")
     call_parser.add_argument("--debug", action="store_true",
@@ -103,6 +106,8 @@ Examples:
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--repeatmasker-n", type=int, default=1,
                                 help="Number of top-scoring repeat annotations to return (default: 1)")
+    annotate_parser.add_argument("--threads", "-t", type=str, default="8",
+                                help="Number of threads to use (integer or 'auto' (defaults to 2x CPU count, up to 32), default: 8)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,
                                 help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     annotate_parser.add_argument("--logging",
@@ -134,6 +139,8 @@ Example:
                               help="Maximum allele frequency (default: 0.1)")
     refine_parser.add_argument("--test-mode", type=int, default=None,
                               help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
+    refine_parser.add_argument("--threads", type=str, default="8",
+                              help="Number of threads to use (integer or 'auto', default: 8)")
     refine_parser.add_argument("--auto-load-registry", choices=['True', 'False'], default='True',
                               help="Whether to automatically load existing registry if found (default: True)")
     refine_parser.add_argument("--force-new-registry", action="store_true",

@@ -1,6 +1,30 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Union
+import os
+
+def get_threads(threads_arg):
+    """Convert threads argument to an integer.
+    
+    Args:
+        threads_arg: String or integer specifying threads ('auto' or int)
+        
+    Returns:
+        int: Number of threads to use
+    """
+    if threads_arg == 'auto':
+        return min(32, max(8, os.cpu_count() * 2))
+    else:
+        try:
+            return int(threads_arg)
+        except ValueError:
+            try:
+                parsed = int(float(threads_arg))
+                print(f"WARNING: Only integer values are supported for threads. Converting {threads_arg} to {parsed}.")
+                return parsed
+            except ValueError:
+                print(f"WARNING: Invalid threads argument {threads_arg} could not be parsed, falling back to default (8)")
+                return 8
 
 @dataclass
 class CallConfig:
@@ -12,6 +36,7 @@ class CallConfig:
     # Optional arguments
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
+    threads: int = 8
 
     @classmethod
     def from_args(cls, args):
@@ -20,7 +45,8 @@ class CallConfig:
             fastq_file=Path(args.fastq),
             output_dir=Path(args.output_dir),
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
-            debug=args.debug
+            debug=args.debug,
+            threads=get_threads(args.threads)
         )
 
 @dataclass
@@ -39,6 +65,7 @@ class RefineConfig:
     auto_load_registry: bool = True
     force_new_registry: bool = False
     test_mode: Optional[int] = None
+    threads: int = 8
 
     @classmethod
     def from_args(cls, args):
@@ -53,7 +80,8 @@ class RefineConfig:
             auto_load_registry=args.auto_load_registry == 'True',
             force_new_registry=args.force_new_registry,
             debug=args.debug,
-            test_mode=args.test_mode
+            test_mode=args.test_mode,
+            threads=get_threads(args.threads)
         )
 
 @dataclass
@@ -77,6 +105,7 @@ class AnnotateConfig:
     test_mode: Optional[int] = None
     proximal_span: int = 100
     repeatmasker_n: int = 1 # number of top-scoring repeat annotations to return
+    threads: int = 8
 
     @classmethod
     def from_args(cls, args):
@@ -88,7 +117,8 @@ class AnnotateConfig:
             debug=args.debug,
             test_mode=args.test_mode,
             proximal_span=args.proximal_span,
-            repeatmasker_n=args.repeatmasker_n
+            repeatmasker_n=args.repeatmasker_n,
+            threads=get_threads(args.threads)
         )
         
         # Handle bed and gff files and their names

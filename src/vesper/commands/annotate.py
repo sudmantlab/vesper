@@ -47,6 +47,7 @@ def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: in
 def run_annotate(args, logger):
     """Run the annotation pipeline."""
     config = AnnotateConfig.from_args(args)
+
     timestamp = datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
     if config.test_mode is not None:
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
@@ -75,9 +76,9 @@ def run_annotate(args, logger):
         variants = list(vcf_proc.instantiate_variants())
     logger.info(f"Loaded {len(variants)} variants")
     
-    # TODO: set config options for threads, memory, etc.
-    n_workers = min(32, max(4, os.cpu_count() * 2))
-    chunk_size = max(1, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
+    # TODO: set config options for memory, etc.
+    n_workers = config.threads
+    chunk_size = max(10, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
     chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
     
     
