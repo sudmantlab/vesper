@@ -76,6 +76,7 @@ class AnnotateConfig:
     debug: bool = False
     test_mode: Optional[int] = None
     proximal_span: int = 100
+    repeatmasker_n: int = 1 # number of top-scoring repeat annotations to return
 
     @classmethod
     def from_args(cls, args):
@@ -86,7 +87,8 @@ class AnnotateConfig:
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
             debug=args.debug,
             test_mode=args.test_mode,
-            proximal_span=args.proximal_span
+            proximal_span=args.proximal_span,
+            repeatmasker_n=args.repeatmasker_n
         )
         
         # Handle bed and gff files and their names

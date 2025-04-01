@@ -34,7 +34,6 @@ class VariantReadGroups(BaseModel):
     class Config:
         frozen = True
 
-
 class RegistryMetadata(BaseModel):
     """Metadata about the entire read registry."""
     total_variants: int
@@ -45,3 +44,24 @@ class RegistryMetadata(BaseModel):
 
     class Config:
         frozen = True 
+
+class RepeatMasker(BaseModel):
+    """Result of RepeatMasker analysis."""
+    repeat_name: str
+    repeat_class: str
+    score: int
+    divergence: float
+    deletion: float
+    insertion: float
+    query_start: int
+    query_end: int
+    query_left: int
+    strand: str
+    repeat_start: int
+    repeat_end: int
+    repeat_left: int
+    match_length: int
+    match_coverage: float
+
+    class Config:
+        frozen = True

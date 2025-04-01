@@ -51,9 +51,6 @@ def setup_file_logging(log_dir: Path, command_name: str, debug: bool = False, co
     
     # Create and return the vesper logger
     logger = logging.getLogger('vesper')
-    
-    # Only log the file location to console if console output is enabled
-    if console_output:
-        logger.info(f"Logging to file: {log_file}")
+    print(f"{timestamp} - Logging to file: {log_file}")
     
     return logger 

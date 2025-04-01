@@ -225,7 +225,7 @@ def test_parse_and_simplify(temp_dir, sample_out_file):
     assert len(results["var2"]) == 2
 
     # check that the top-scoring annotation is returned for each variant
-    top_results = processor._parse_and_simplify(temp_dir)
+    top_results = processor._parse_and_sort(temp_dir)
     
     # Check basic structure
     assert isinstance(top_results, dict)

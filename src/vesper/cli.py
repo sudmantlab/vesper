@@ -99,9 +99,10 @@ Examples:
                                 help="GFF/GTF file(s) for annotations. Multiple files can be provided.")
     annotate_files.add_argument("--gff-names", "-gn", nargs='+', default=[],
                                 help="Shorthand names for GFF files (required). Must match number of GFF files.")
-    
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
+    annotate_parser.add_argument("--repeatmasker-n", type=int, default=1,
+                                help="Number of top-scoring repeat annotations to return (default: 1)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,
                                 help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     annotate_parser.add_argument("--logging",

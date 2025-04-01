@@ -50,3 +50,6 @@ Thumbs.db
 
 # Test files
 tests/files/
+
+# Temporary files/directories
+RM_*/

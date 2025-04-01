@@ -8,6 +8,7 @@ import logging
 import json
 
 from ..processors.annotations import GenomicInterval
+from .repeatmasker import RepeatMaskerResult
 from .reads import AlignedRead, ReadGroup
 
 class SVType(Enum):
@@ -81,7 +82,7 @@ class Variant:
             
             info_dict = {}
             for key, value in record.info.items():
-                if key == 'OVERLAPPING' or key == 'PROXIMAL':
+                if key in ['OVERLAPPING', 'PROXIMAL', 'REPEATMASKER_RESULTS']:
                     info_dict[key] = ','.join(value) # reconstruct json string
                 elif isinstance(value, tuple): 
                     info_dict[key] = list(value)
@@ -139,7 +140,7 @@ class VariantAnalysis:
 
     overlapping_features: List[GenomicInterval] = field(default_factory=list)
     proximal_features: List[GenomicInterval] = field(default_factory=list)
-    repeatmasker_results: List[Dict[str, Any]] = field(default_factory=list)
+    repeatmasker_results: List[RepeatMaskerResult] = field(default_factory=list)
     confidence: Optional[float] = None
 
     def __post_init__(self):
@@ -147,6 +148,8 @@ class VariantAnalysis:
             self.overlapping_features = [GenomicInterval.from_json(record) for record in json.loads(self.variant.info['OVERLAPPING'])]
         if 'PROXIMAL' in self.variant.info:
             self.proximal_features = [GenomicInterval.from_json(record) for record in json.loads(self.variant.info['PROXIMAL'])]
+        if 'REPEATMASKER_RESULTS' in self.variant.info:
+            self.repeatmasker_results = [RepeatMaskerResult.from_json(record) for record in json.loads(self.variant.info['REPEATMASKER_RESULTS'])]
 
     def __repr__(self) -> str:
         return (f"\n{self.variant},\nconfidence={self.confidence},\nsupport_reads={len(self.support_reads)},\n"
@@ -193,13 +196,30 @@ class VariantAnalysis:
 
         # TODO: placeholder check for GTEx annotations in overlapping or proximal features
         gtex_multiplier = 1.0
-        for feature in self.overlapping_features + self.proximal_features:
+        for feature in self.overlapping_features:
             if any('gtex' in str(v).lower() for v in feature.metadata.values()):
                 gtex_multiplier = 1.2
                 break
+
+        # TODO: placeholder check for segdups
+        segdups_multiplier = 1.0
+        for feature in self.overlapping_features:
+            if any('segdups' in str(v).lower() for v in feature.metadata.values()):
+                segdups_multiplier = 0.5
+                break
+        
+        # TODO: placeholder check for repeatmasker insertion annotations matching overlapping or proximal features
+        repeatmasker_multiplier = 1.0
+        if hasattr(self, 'repeatmasker_results') and self.repeatmasker_results:
+            for (i, j) in [('SINE/Alu', 'Alu'), ('LINE/L1', 'L1')]:
+                in_annotation = any(i in result.repeat_class for result in self.repeatmasker_results)
+                in_overlap = any(j in str(feature.metadata) for feature in self.overlapping_features)
+                
+            if in_annotation and in_overlap:
+                repeatmasker_multiplier = repeatmasker_multiplier * 0.5
         
         # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier)
+        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier * repeatmasker_multiplier)
         self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
         
     def to_vcf_record(self) -> str:
@@ -238,6 +258,7 @@ class VariantAnalysis:
             info.append(f"NSFTCLIP={self.metrics['comparison']['softclip_stats_other']['pct_softclipped']:.1f}")
         
         # Add annotations to INFO field if available
+        # TODO: Make this a general method for all annotations
         if self.overlapping_features:
             overlapping = []
             for interval in self.overlapping_features:
@@ -253,6 +274,15 @@ class VariantAnalysis:
                     proximal.append(interval.to_dict())
             if proximal:
                 info.append(f"PROXIMAL={json.dumps(proximal)}")
+        
+        if self.repeatmasker_results:
+            repeatmasker = []
+            for result in self.repeatmasker_results: 
+                # TODO: ensure this is compatible with both best/multiple hits
+                if isinstance(result, RepeatMaskerResult):
+                    repeatmasker.append(result.to_dict())
+            if repeatmasker:
+                info.append(f"REPEATMASKER_RESULTS={json.dumps(repeatmasker)}")
                 
         info_field = ";".join(info) 
     

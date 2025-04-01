@@ -2,6 +2,7 @@ annotated-types==0.7.0
 black==25.1.0
 click==8.1.8
 coverage==7.6.12
+h5py==3.13.0
 iniconfig==2.0.0
 isort==6.0.1
 markdown-it-py==3.0.0
@@ -24,5 +25,6 @@ pytz==2025.1
 rich==13.9.4
 rich-argparse==1.7.0
 six==1.17.0
+trf==1.1.1
 typing_extensions==4.12.2
 tzdata==2025.1

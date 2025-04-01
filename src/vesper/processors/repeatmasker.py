@@ -9,9 +9,12 @@ from typing import List, Dict, Any, Optional
 import shutil
 import tempfile
 import uuid
+import json
+from glob import glob
+from dataclasses import dataclass, field
 
 from ..models.variants import VariantAnalysis
-
+from ..models.repeatmasker import RepeatMaskerResult
 
 class RepeatMaskerProcessor:
     """Process insertion sequences using RepeatMasker.
@@ -48,7 +51,8 @@ class RepeatMaskerProcessor:
         Returns:
             Path to temporary directory
         """
-        self._cleanup_temp_dir() # redundant enforcement to ensure no collisions
+        if self.current_temp_dir and self.current_temp_dir.exists():
+            self._cleanup_temp_dir() # remove any existing temp dir
         
         self.current_temp_dir = self.repeatmasker_dir / f"batch_{uuid.uuid4().hex[:8]}"
         self.current_temp_dir.mkdir(parents=True)
@@ -107,7 +111,7 @@ class RepeatMaskerProcessor:
             str(fasta_path)
         ]
         
-        self.logger.info(f"Running RepeatMasker: {' '.join(command)}")
+        self.logger.info(f"Running RepeatMasker with command: {' '.join(command)}")
         
         try:
             result = subprocess.run(
@@ -139,7 +143,7 @@ class RepeatMaskerProcessor:
         if missing_files:
             self.logger.warning(f"Missing expected RepeatMasker output files: {', '.join(str(f) for f in missing_files)}")
 
-    def _parse_output(self, temp_dir: Path) -> Dict[str, List[Dict[str, Any]]]:
+    def _parse_output(self, temp_dir: Path) -> Dict[str, List[RepeatMaskerResult]]:
         """Parse a RepeatMasker .out file and return all annotations.
         
         Args:
@@ -149,10 +153,10 @@ class RepeatMaskerProcessor:
             Dictionary mapping sequence IDs to repeat annotations
         """
         outfile = temp_dir / "insertions.fa.out"
-        if not outfile.exists():
-            raise FileNotFoundError(f"RepeatMasker output file not found: {outfile}")
-        
         results = {}
+        if not outfile.exists():
+            self.logger.debug(f"No RepeatMasker output file found: {outfile}")
+            return results
         
         with open(outfile, 'r') as f:
             for line in f: # skip header
@@ -168,11 +172,9 @@ class RepeatMaskerProcessor:
                 try:
                     # note and remove trailing asterisks (doc info below)
                     # asterisk (*) in the final column = annotation partially overlaps a higher-scoring match (<80%)
-                    # flag as a secondary annotation
-                    overlap_check = False
+                    # results are sorted in the end anyway
                     if line.endswith('*'):
                         line = line[:-1].strip()
-                        overlap_check = True
                     fields = re.split(r'\s+', line.strip())
                     if not fields or len(fields) < 14:
                         self.logger.warning(f"Skipping invalid line (not enough fields): {line}")
@@ -224,24 +226,23 @@ class RepeatMaskerProcessor:
                     repeat_left_raw = fields[repeat_start_idx+2]
                     repeat_left = int(repeat_left_raw.strip('()')) if repeat_left_raw.strip('()').isdigit() else 0
                     
-                    result = {
-                        'score': sw_score,
-                        'divergence': perc_div,
-                        'deletion': perc_del,
-                        'insertion': perc_ins,
-                        'query_start': query_begin, # ex. if 1, then the match started at the first base of the insertion sequence
-                        'query_end': query_end,
-                        'query_left': query_left, # remaining bases of the insertion sequence that are not part of the match
-                        'strand': strand,
-                        'repeat_name': repeat_name,
-                        'repeat_class': repeat_class,
-                        'repeat_start': repeat_start,
-                        'repeat_end': repeat_end,
-                        'repeat_left': repeat_left,
-                        'match_length': query_end - query_begin + 1,
-                        'match_coverage': (query_end - query_begin + 1) / (query_end + query_left), # ex. 100% coverage if the whole insertion sequence is matched
-                        'is_secondary': overlap_check
-                    }
+                    result = RepeatMaskerResult(
+                        repeat_name=repeat_name,
+                        repeat_class=repeat_class,
+                        sw_score=sw_score,
+                        divergence=perc_div,
+                        deletion=perc_del,
+                        insertion=perc_ins,
+                        query_start=query_begin,
+                        query_end=query_end,
+                        query_left=query_left,
+                        strand=strand,
+                        repeat_start=repeat_start,
+                        repeat_end=repeat_end,
+                        repeat_left=repeat_left,
+                        match_length=query_end - query_begin + 1,
+                        match_coverage=(query_end - query_begin + 1) / (query_end + query_left),
+                    )
                     
                     if query_name not in results:
                         results[query_name] = []
@@ -253,30 +254,48 @@ class RepeatMaskerProcessor:
         
         return results
     
-    def _parse_and_simplify(self, temp_dir: Path) -> Dict[str, Dict[str, Any]]:
-        """For each query sequence, returns only the top-scoring annotation.
+    def _parse_and_sort(self, temp_dir: Path) -> Dict[str, List[RepeatMaskerResult]]:
+        """For each query sequence, sort and return annotations.
         
         Args:
             temp_dir: Path to the directory containing RepeatMasker output files
             
         Returns:
-            Dictionary mapping sequence IDs to their best repeat annotation
+            List of annotations (dictionaries) for each query sequence.
         """
-        all_results = self._parse_output(temp_dir)
-        simplified = {}
+        try:
+            all_results = self._parse_output(temp_dir)
+        except Exception as e:
+            self.logger.warning(f"Error parsing RepeatMasker output: {e}. Continuing...")
+            return {}
+        
+        sorted_results = {}
         
         for query_name, annotations in all_results.items():
-            if not annotations:
+            if not annotations: # insertion seq not IDed w/ repetitive motif
                 continue
                 
-            sorted_annotations = sorted(annotations, key=lambda x: x['score'], reverse=True)
-            best_hit = sorted_annotations[0]
-            
-            simplified[query_name] = best_hit
+            sorted_annotations = sorted(annotations, key=lambda x: (x.match_length, -x.divergence), reverse=False)
+            sorted_results[query_name] = sorted_annotations
         
-        return simplified
+        return sorted_results
     
-    def batch_analysis(self, variants: List[VariantAnalysis]) -> None:
+    def assign_results(self, variant_id: str, results: Dict[str, List[RepeatMaskerResult]], n: int = 1) -> List[RepeatMaskerResult]:
+        """Query RepeatMasker results for the given variant ID and return the top n results.
+        
+        Args:
+            variant_id: ID of the variant to query
+            results: Dictionary mapping sequence IDs to repeat annotations
+            
+        Returns:
+            List of RepeatMaskerResult objects corresponding to the variant ID
+        """
+        if variant_id in results:
+            return results[variant_id][:n]
+        else:
+            return []
+    
+    def batch_analysis(self, variants: List[VariantAnalysis], chunk_idx: int, n: int = 1) -> None:
         """Analyze a batch of variants with RepeatMasker.
         
         Args:
@@ -288,26 +307,48 @@ class RepeatMaskerProcessor:
         temp_dir = self._create_temp_dir()
         try:
             fasta_path = self._write_insertion_fasta(variants, temp_dir)
+            if fasta_path.stat().st_size == 0:
+                self.logger.info("No insertions found in batch - skipping RepeatMasker analysis")
+                return
+            
             self._run_repeatmasker(fasta_path, temp_dir)
+            results = self._parse_and_sort(temp_dir)
             
-            # Parse results (full details)
-            detailed_results = self._parse_output(temp_dir)
-            
-            # Get simplified results (best hit only)
-            simplified_results = self._parse_and_simplify(temp_dir)
-            
-            # Update variant objects with results
             for variant in variants:
-                var_id = variant.variant.ID
-                if var_id in detailed_results:
-                    variant.repeatmasker_results = {
-                        'detailed': detailed_results[var_id],
-                        'summary': simplified_results.get(var_id)
-                    }
+                variant.repeatmasker_results = self.assign_results(variant.variant.ID, results, n)
+
+            # TODO: can this be done more cleanly?
+            temp_json = self.repeatmasker_dir / f"rm.chunk_{chunk_idx}.json"
+            results_dict = {
+                var_id: [result.to_dict() for result in result_list] 
+                for var_id, result_list in results.items()
+            }
+            with open(temp_json, 'w') as f:
+                json.dump(results_dict, f)
                     
-            self.logger.info(f"Processed {len(variants)} variants through RepeatMasker, {len(detailed_results)} results found")
+            self.logger.info(f"Processed {len(variants)} variants through RepeatMasker, {len(results)} results found")
         except Exception as e:
             self.logger.error(f"Error processing variants with RepeatMasker: {e}")
             raise e
         finally:
             self._cleanup_temp_dir()
+
+    @staticmethod
+    def merge_temp_jsons(directory: Path, final_json_path: Path) -> None:
+        """Merge all temporary JSON files into a single final JSON file.
+        
+        Args:
+            directory: Directory containing temporary JSON files
+            final_json_path: Path for final merged JSON file
+        """
+        merged_results = {}
+        temp_jsons = glob(str(directory / "*.chunk_*.json"))
+        
+        for temp_json in temp_jsons:
+            with open(temp_json, 'r') as f:
+                chunk_results = json.load(f)
+                merged_results.update(chunk_results)
+            os.remove(temp_json)
+            
+        with open(final_json_path, 'w') as f:
+            json.dump(merged_results, f, indent=4)

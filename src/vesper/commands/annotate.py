@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import datetime
 import os
+from glob import glob
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
@@ -13,15 +14,14 @@ from vesper.processors.annotations import BEDProcessor, GFFProcessor
 from vesper.processors.repeatmasker import RepeatMaskerProcessor
 from vesper.utils.config import AnnotateConfig
 
-def process_annotate_chunk(variants: list, annotation_procs: list, repeatmasker_proc: RepeatMaskerProcessor, chunk_idx: int, proximal_span: int, logger: logging.Logger) -> None:
+def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: int, config: AnnotateConfig, logger: logging.Logger) -> None:
     """Process a chunk of variants through the annotation pipeline with multiple annotation processors.
     
     Args:
         variants: List of variants to process
         annotation_procs: List of AnnotationProcessor instances (BED or GFF)
-        repeatmasker_proc: RepeatMasker processor instance
         chunk_idx: Index of this chunk for logging
-        proximal_span: Distance (+/-) to search for proximal features
+        config: AnnotateConfig instance
         logger: Logger instance
     """
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
@@ -29,10 +29,18 @@ def process_annotate_chunk(variants: list, annotation_procs: list, repeatmasker_
     # Apply overlapping/proximal annotations first
     for variant in variants:
         for proc in annotation_procs:
-            proc._annotate_variant(variant, proximal_span=proximal_span)
+            proc._annotate_variant(variant, proximal_span=config.proximal_span)
             
-    # Process insertion sequences with RepeatMasker
-    repeatmasker_proc.process_batch(variants)
+    # Follow by processing insertion sequences with RepeatMasker
+    # TODO: this should be done in a separate thread?
+    with RepeatMaskerProcessor(config.output_dir) as repeatmasker_proc:
+        repeatmasker_proc.batch_analysis(
+            variants, 
+            chunk_idx=chunk_idx,
+            n=config.repeatmasker_n,
+        )
+    
+    repeatmasker_proc.__exit__(None, None, None) # TODO: redundancy check, ensure exit and cleanup
     
     logger.info(f"Completed annotation chunk {chunk_idx}")
 
@@ -72,8 +80,11 @@ def run_annotate(args, logger):
     chunk_size = max(1, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
     chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
     
-    logger.info(f"Processing {len(chunks)} variant chunks with {n_workers} workers")
+    
     start_time = time.time()
+    print(f"{timestamp} - Starting annotation pipeline")
+    logger.info(f"Starting annotation pipeline")
+    logger.info(f"Processing {len(chunks)} variant chunks with {n_workers} workers")
 
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
@@ -109,11 +120,10 @@ def run_annotate(args, logger):
                  TimeRemainingColumn()) as progress, \
          ThreadPoolExecutor(max_workers=n_workers) as executor:
         
-        # Open all processors using context managers
+        # Open all annotation processors using context managers
+        # repeatmasker processor is opened within each batch
         for proc in annotation_procs:
             proc.__enter__()
-        repeatmasker_proc = RepeatMaskerProcessor(config.output_dir)
-        repeatmasker_proc.__enter__()
         
         try:
             task = progress.add_task("[cyan]Annotating variants...", total=len(variants))           
@@ -123,9 +133,8 @@ def run_annotate(args, logger):
                     process_annotate_chunk, 
                     chunk, 
                     annotation_procs,
-                    repeatmasker_proc,
                     idx,
-                    config.proximal_span,
+                    config,
                     logger
                 )
                 for idx, chunk in enumerate(chunks)
@@ -137,18 +146,17 @@ def run_annotate(args, logger):
                     future.result()
                     completed_variants += chunk_size
                     progress.update(task, advance=chunk_size)
-                    logger.info(f"Progress: {completed_variants}/{len(variants)} variants completed ({completed_variants/len(variants)*100:.1f}%)")
+                    logger.debug(f"Progress: {completed_variants}/{len(variants)} variants completed ({completed_variants/len(variants)*100:.1f}%)")
                 except Exception as e:
                     logger.error(f"Error processing chunk: {str(e)}")
                     raise
         finally:
             for proc in annotation_procs:
                 proc.__exit__(None, None, None)
-            repeatmasker_proc.__exit__(None, None, None)
     
     elapsed = time.time() - start_time
     logger.info(f"Completed annotation in {elapsed:.2f} seconds")
-    logger.info(f"Annotated {len(variants)} variants using {total_annotation_files} annotation file(s)")
+    logger.info(f"Annotated {len(variants)} variants with {total_annotation_files} annotation file(s)")
     
     if config.bed_files:
         logger.info(f"BED file(s) ({len(config.bed_files)}):")
@@ -183,6 +191,12 @@ def run_annotate(args, logger):
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     print(f"{timestamp} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     
+    temp_jsons = glob(str(config.output_dir / 'repeatmasker' / '*.chunk_*.json'))
+    repeatmasker_json_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.repeatmasker_output.json')
+    logger.info(f"Merging {len(temp_jsons)} temporary JSON files into {repeatmasker_json_path}")
+    print(f"{timestamp} - Saving RepeatMasker results to {repeatmasker_json_path}")
+    RepeatMaskerProcessor.merge_temp_jsons(config.output_dir / 'repeatmasker', repeatmasker_json_path)
+    
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
     logger.info(f"Writing annotated variants to {output_vcf_path}")
     print(f"{timestamp} - Writing annotated variants to {output_vcf_path}")
@@ -204,7 +218,7 @@ def run_annotate(args, logger):
             progress.update(task, advance=1)
             
             if (i + 1) % 1000 == 0:
-                logger.info(f"Wrote {i + 1}/{len(variants)} variants")
+                logger.debug(f"Wrote {i + 1}/{len(variants)} variants")
     
     write_elapsed = time.time() - start_write_time
     logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")

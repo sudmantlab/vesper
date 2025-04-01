@@ -10,7 +10,7 @@ import datetime
 
 from ..models.variants import Variant
 from ..models.reads import ReadGroup, AlignedRead
-from ..models.registry import ReadMetadata, VariantReadGroups, RegistryMetadata
+from ..models.validation import ReadMetadata, VariantReadGroups, RegistryMetadata
 
 
 class ReadProcessor:

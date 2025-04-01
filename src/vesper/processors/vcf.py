@@ -169,6 +169,7 @@ class VCFWriter:
             self.write_header_line(buffer, "INFO=<ID=CONFIDENCE,Number=1,Type=Float,Description=\"Confidence score for the variant\">")
             self.write_header_line(buffer, "INFO=<ID=OVERLAPPING,Number=.,Type=String,Description=\"Overlapping annotated features\">")
             self.write_header_line(buffer, "INFO=<ID=PROXIMAL,Number=.,Type=String,Description=\"Proximal annotated features\">")
+            self.write_header_line(buffer, "INFO=<ID=REPEATMASKER_RESULTS,Number=.,Type=String,Description=\"Repetitive sequence motifs identified via RepeatMasker (insertion only)\">")
             self.write_header_line(buffer, "FORMAT=<ID=DR,Number=1,Type=Integer,Description=\"Number of reference-supporting reads\">")
             self.write_header_line(buffer, "FORMAT=<ID=DV,Number=1,Type=Integer,Description=\"Number of variant-supporting reads\">")
             self.write_line(buffer, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE")
