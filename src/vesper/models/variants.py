@@ -7,7 +7,7 @@ import pysam
 import logging
 import json
 
-from .genomic_intervals import GenomicInterval
+from ..processors.annotations import GenomicInterval
 from .repeatmasker import RepeatMaskerResult
 from .reads import AlignedRead, ReadGroup
 
