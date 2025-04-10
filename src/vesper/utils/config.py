@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Union
 import os
@@ -66,10 +66,17 @@ class RefineConfig:
     force_new_registry: bool = False
     test_mode: Optional[int] = None
     threads: int = 8
+    save_read_fields: List[str] = field(default_factory=list)
 
     @classmethod
     def from_args(cls, args):
         """Create RefineConfig instance from parsed command line arguments."""
+        # Validate requested fields exist in ReadMetadata schema
+        valid_fields = {'sequence', 'cigartuples', 'cigar', 'edit_distance', 'methylation_status'}
+        invalid_fields = set(args.save_read_fields) - valid_fields
+        if invalid_fields:
+            raise ValueError(f"Invalid read fields requested: {invalid_fields}. Valid fields are: {valid_fields}")
+            
         return cls(
             vcf_input=Path(args.vcf),
             output_dir=Path(args.output_dir),
@@ -81,7 +88,8 @@ class RefineConfig:
             force_new_registry=args.force_new_registry,
             debug=args.debug,
             test_mode=args.test_mode,
-            threads=get_threads(args.threads)
+            threads=get_threads(args.threads),
+            save_read_fields=args.save_read_fields
         )
 
 @dataclass

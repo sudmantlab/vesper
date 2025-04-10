@@ -70,7 +70,8 @@ def run_refine(args, logger):
                  TimeRemainingColumn()) as progress, \
          ReadProcessor(config.bam_file, registry_dir=config.output_dir / 'read_registry',
                       auto_load_registry=config.auto_load_registry,
-                      force_new_registry=config.force_new_registry) as read_proc, \
+                      force_new_registry=config.force_new_registry,
+                      save_read_fields=config.save_read_fields) as read_proc, \
          ThreadPoolExecutor(max_workers=n_workers) as executor:
         task = progress.add_task("[cyan]Refining variants...", total=len(variants))  
         

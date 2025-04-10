@@ -145,6 +145,8 @@ Example:
                               help="Whether to automatically load existing registry if found (default: True)")
     refine_parser.add_argument("--force-new-registry", action="store_true",
                               help="Forces rebuilding of registry even if one exists.")
+    refine_parser.add_argument("--save-read-fields", nargs='+', default=[],
+                              help="Optional read fields to serialize (e.g. sequence cigar methylation)")
     refine_parser.add_argument("--logging",
                               help="Log directory (default: output/logs)")
     refine_parser.add_argument("--debug", action="store_true",

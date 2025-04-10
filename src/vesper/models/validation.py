@@ -8,6 +8,8 @@ class ReadMetadata(BaseModel):
     chrom: str
     start: int
     end: int
+    length: int
+    aligned_length: int
     mapq: int
     strand: str
     is_supplementary: bool
@@ -18,6 +20,7 @@ class ReadMetadata(BaseModel):
     cigar_stats: Dict[str, int]
 
     # Optional additional fields to serialize
+    sequence: Optional[str] = None
     cigartuples: Optional[List[Tuple[int, int]]] = None
     cigar: Optional[str] = None
     edit_distance: Optional[int] = None

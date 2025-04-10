@@ -27,7 +27,8 @@ class ReadProcessor:
     """
 
     def __init__(self, bam_path: Path, window_size: int = 1000, registry_dir: Optional[Path] = None,
-                 auto_load_registry: bool = True, force_new_registry: bool = False):
+                 auto_load_registry: bool = True, force_new_registry: bool = False,
+                 save_read_fields: List[str] = None):
         """Initialize ReadProcessor.
         
         Args:
@@ -36,12 +37,14 @@ class ReadProcessor:
             registry_dir: Optional directory to save/load registry files
             auto_load_registry: Whether to automatically load existing registry if found
             force_new_registry: Force creation of new registry even if one exists
+            save_read_fields: List of fields to save in read metadata
         """
         self.bam_path = bam_path
         self.window_size = window_size
         self.registry_dir = registry_dir
         self._bam: Optional[pysam.AlignmentFile] = None
         self.logger = logging.getLogger(__name__)
+        self.save_read_fields = save_read_fields or []
         
         # Registry data structures
         self._read_registry: Dict[str, AlignedRead] = {}
@@ -230,7 +233,7 @@ class ReadProcessor:
             
             registry_metadata_path = self.registry_dir / "registry_metadata.json"
             with open(registry_metadata_path, 'w') as f:
-                json.dump(registry_metadata.model_dump(), f)
+                json.dump(registry_metadata.model_dump(), f, indent=4)
             
             # Save variant read groups
             variant_groups_dict = {}
@@ -239,30 +242,46 @@ class ReadProcessor:
                 
             variant_groups_path = self.registry_dir / "variant_read_groups.json"
             with open(variant_groups_path, 'w') as f:
-                json.dump(variant_groups_dict, f)
+                json.dump(variant_groups_dict, f, indent=4)
             
             # Save read metadata
             read_metadata = {}
             for name, read in self._read_registry.items():
-                read_model = ReadMetadata(
-                    chrom=read.chrom,
-                    start=read.start,
-                    end=read.end,
-                    mapq=read.mapq,
-                    strand=read.strand,
-                    cigar=read.cigar,
-                    is_supplementary=read.is_supplementary,
-                    is_secondary=read.is_secondary,
-                    edit_distance=read.edit_distance,
-                    soft_clip_left=read.soft_clip_left,
-                    soft_clip_right=read.soft_clip_right,
-                    cigar_stats=read.cigar_stats
-                )
+                metadata = {
+                    'chrom': read.chrom,
+                    'start': read.start,
+                    'end': read.end,
+                    'length': read.length,
+                    'aligned_length': read.aligned_length,
+                    'mapq': read.mapq,
+                    'strand': read.strand,
+                    'cigar': read.cigar,
+                    'is_supplementary': read.is_supplementary,
+                    'is_secondary': read.is_secondary,
+                    'edit_distance': read.edit_distance,
+                    'soft_clip_left': read.soft_clip_left,
+                    'soft_clip_right': read.soft_clip_right,
+                    'cigar_stats': read.cigar_stats
+                }
+                
+                # optional fields - make sure to edit cli, config, validation spec if modified
+                if 'sequence' in self.save_read_fields:
+                    metadata['sequence'] = read.sequence
+                if 'cigartuples' in self.save_read_fields:
+                    metadata['cigartuples'] = read.cigartuples
+                if 'cigar' in self.save_read_fields:
+                    metadata['cigar'] = read.cigar
+                if 'edit_distance' in self.save_read_fields:
+                    metadata['edit_distance'] = read.edit_distance
+                if 'methylation_status' in self.save_read_fields:
+                    metadata['methylation_status'] = read.methylation
+                
+                read_model = ReadMetadata(**metadata)
                 read_metadata[name] = read_model.model_dump()
                 
             reads_path = self.registry_dir / "read_metadata.json"
             with open(reads_path, 'w') as f:
-                json.dump(read_metadata, f)
+                json.dump(read_metadata, f, indent=4)
                 
             self.logger.info(f"Registry saved to {self.registry_dir}")
     
