@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any, Iterator
 import logging
 import sqlite3
 import threading
@@ -10,6 +10,8 @@ import time
 import gzip
 from concurrent.futures import ThreadPoolExecutor
 import json
+
+from ..models.intervals import GenomicInterval
 
 
 @dataclass
@@ -223,6 +225,18 @@ class AnnotationProcessor(ABC):
                 variant.proximal_features.append(feature)
                 seen.add(feature_key)
 
+    def iter_intervals(self) -> Iterator[GenomicInterval]:
+        """Iterate over genomic intervals in the annotation file."""
+        raise NotImplementedError
+
+    def get_overlapping(self, chrom: str, start: int, end: int) -> List[GenomicInterval]:
+        """Get intervals overlapping the given region."""
+        return [
+            interval for interval in self.iter_intervals()
+            if (interval.chrom == chrom and
+                interval.start <= end and
+                interval.end >= start)
+        ]
 
 class BEDProcessor(AnnotationProcessor):
     """Implementation of BED file processor."""
@@ -347,6 +361,33 @@ class BEDProcessor(AnnotationProcessor):
         conn.close()
         return self
 
+    def iter_intervals(self) -> Iterator[GenomicInterval]:
+        """Iterate over intervals in BED format."""
+        open_fn = gzip.open if str(self.filepath).endswith('.gz') else open
+        with open_fn(self.filepath, 'rt') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                    
+                fields = line.strip().split('\t')
+                if len(fields) < 3:
+                    continue
+                    
+                chrom = fields[0]
+                start = int(fields[1])
+                end = int(fields[2])
+                
+                interval = GenomicInterval(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=fields[3] if len(fields) > 3 else None,
+                    score=float(fields[4]) if len(fields) > 4 else None,
+                    strand=fields[5] if len(fields) > 5 else None
+                )
+                
+                yield interval
+
 class GFFProcessor(AnnotationProcessor):
     """Implementation of GFF file processor."""
     def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'GFFProcessor':
@@ -413,48 +454,46 @@ class GFFProcessor(AnnotationProcessor):
                     continue
                     
                 fields = line.strip().split('\t')
-                if len(fields) < 9:  # GFF requires 9 fields
-                    raise ValueError(f"Line {i}: GFF format requires 9 fields, found {len(fields)}")
-             
-                for idx, field in enumerate(fields[:3]):
-                    if not field.strip():
-                        raise ValueError(f"Line {i}: Mandatory GFF field {idx+1} is empty")
+                if len(fields) < 8:
+                    continue
+                    
+                chrom = fields[0]
+                start = int(fields[3]) - 1  # Convert to 0-based
+                end = int(fields[4])
+                strand = fields[6]
                 
-                chrom = fields[0].strip(' ')
-                
-                try:
-                    start = int(fields[3])
-                    end = int(fields[4])
-                except ValueError:
-                    raise ValueError(f"Line {i}: Invalid start/end coordinates: {fields[3]}, {fields[4]}")
-                
-                # write all non-mandatory fields into metadata json
-                metadata = {
-                    'source': fields[1].strip(),
-                    'feature_type': fields[2].strip(),
-                    'score': None if fields[5] == '.' else float(fields[5]),
-                    'strand': fields[6],
-                    'frame': fields[7]
-                }
-
-                attributes = fields[8].strip()
-                if attributes:
-                    parts = attributes.split(';')
-                    for part in parts:
-                        if not part.strip():
+                # Parse attributes
+                attrs = {}
+                attr_str = fields[8]
+                for pair in attr_str.strip(';').split(';'):
+                    if not pair:
+                        continue
+                    try:
+                        key, value = pair.strip().split('=', 1)
+                    except ValueError:
+                        try:
+                            key, value = pair.strip().split(' ', 1)
+                            value = value.strip('"')
+                        except ValueError:
                             continue
-                        if '=' in part:
-                            key, value = part.split('=', 1)
-                            metadata[key.strip()] = value.strip()
+                    attrs[key.strip()] = value.strip()
                 
-                for idx, value in enumerate(fields[9:], start=1):
-                    if value == '':
-                        value = "." # placeholder/empty sub
-                    metadata[f'field{idx}'] = str(value) # cast generic name/value pairs as strings
+                interval = GenomicInterval(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=attrs.get('ID') or attrs.get('gene_id'),
+                    score=float(fields[5]) if fields[5] != '.' else None,
+                    strand=strand if strand != '.' else None,
+                    metadata={
+                        'source': fields[1],
+                        'type': fields[2],
+                        'phase': fields[7],
+                        'attributes': attrs
+                    }
+                )
                 
-                metadata_json = json.dumps(metadata)
-                
-                batch.append((chrom, start, end, metadata_json))
+                batch.append((chrom, start, end, json.dumps(interval.to_dict())))
                 
                 if len(batch) >= batch_size:
                     conn.executemany(
@@ -476,3 +515,53 @@ class GFFProcessor(AnnotationProcessor):
         self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
         conn.close()
         return self
+
+    def iter_intervals(self) -> Iterator[GenomicInterval]:
+        """Iterate over intervals in GFF/GTF format."""
+        open_fn = gzip.open if str(self.filepath).endswith('.gz') else open
+        with open_fn(self.filepath, 'rt') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                    
+                fields = line.strip().split('\t')
+                if len(fields) < 8:
+                    continue
+                    
+                chrom = fields[0]
+                start = int(fields[3]) - 1  # Convert to 0-based
+                end = int(fields[4])
+                strand = fields[6]
+                
+                # Parse attributes
+                attrs = {}
+                attr_str = fields[8]
+                for pair in attr_str.strip(';').split(';'):
+                    if not pair:
+                        continue
+                    try:
+                        key, value = pair.strip().split('=', 1)
+                    except ValueError:
+                        try:
+                            key, value = pair.strip().split(' ', 1)
+                            value = value.strip('"')
+                        except ValueError:
+                            continue
+                    attrs[key.strip()] = value.strip()
+                
+                interval = GenomicInterval(
+                    chrom=chrom,
+                    start=start,
+                    end=end,
+                    name=attrs.get('ID') or attrs.get('gene_id'),
+                    score=float(fields[5]) if fields[5] != '.' else None,
+                    strand=strand if strand != '.' else None,
+                    metadata={
+                        'source': fields[1],
+                        'type': fields[2],
+                        'phase': fields[7],
+                        'attributes': attrs
+                    }
+                )
+                
+                yield interval
