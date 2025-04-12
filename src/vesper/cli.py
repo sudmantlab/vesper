@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 from pathlib import Path
 import logging
 import argparse
@@ -74,18 +75,18 @@ Example:
         formatter_class=parser.formatter_class,
         epilog = """
 Usage notes:
-  - At least one of --bed or --gff must be provided.
-  - Use --bed-names and/or --gff-names to provide shorthand names for each file.
-  - Names must be unique across all annotation files.
+  - Provide annotation files with --files (file format is auto-detected by extension)
+  - Use --names to provide shorthand names for each file (optional, defaults to filenames)
+  - Names must be unique across all annotation files
 
 Examples:
   # Single annotation file
-  vesper annotate --vcf input.vcf --bed annotations.bed --bed-names repeats --output-dir output/
-  vesper annotate --vcf input.vcf --gff annotations.gff3.gz --gff-names genes --output-dir output/
+  vesper annotate --vcf input.vcf --files annotations.bed --names repeats --output-dir output/
+  vesper annotate --vcf input.vcf --files annotations.gff3.gz --names genes --output-dir output/
   
   # Multiple annotation files
-  vesper annotate --vcf input.vcf --bed annotations1.bed annotations2.bed --bed-names repeats centromeres --output-dir output/
-  vesper annotate --vcf input.vcf --gff annotations1.gff3.gz annotations2.gff3.gz --gff-names genes regulatory --output-dir output/
+  vesper annotate --vcf input.vcf --files annotations1.bed annotations2.bed --names repeats centromeres --output-dir output/
+  vesper annotate --vcf input.vcf --files annotations1.gff3.gz annotations2.tsv --names genes features --output-dir output/
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
@@ -94,18 +95,10 @@ Examples:
                                 help="Output directory (required)")
     
     annotate_files = annotate_parser.add_argument_group('annotation files')
-    annotate_files.add_argument("--bed", "-b", nargs='+', default=[],
-                                help="BED file(s) for annotations. Multiple files can be provided.")
-    annotate_files.add_argument("--bed-names", "-bn", nargs='+', default=[],
-                                help="Shorthand names for BED files (required). Must match number of BED files.")
-    annotate_files.add_argument("--gff", "-g", nargs='+', default=[],
-                                help="GFF/GTF file(s) for annotations. Multiple files can be provided.")
-    annotate_files.add_argument("--gff-names", "-gn", nargs='+', default=[],
-                                help="Shorthand names for GFF files (required). Must match number of GFF files.")
-    annotate_files.add_argument("--tsv", nargs='+', default=[],
-                                help="TSV file(s) (with genomic intervals) for annotations. First 3 columns must be chrom, start, end. Multiple files can be provided.")
-    annotate_files.add_argument("--tsv-names", nargs='+', default=[],
-                                help="Shorthand names for TSV files (required). Must match number of TSV files.")
+    annotate_files.add_argument("--files", "-f", nargs='+', default=[],
+                                help="Annotation files (BED, GFF/GTF, TSV). File format is auto-detected by extension.")
+    annotate_files.add_argument("--names", "-n", nargs='+', default=[],
+                                help="Shorthand names for annotation files. Must match number of files.")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--repeatmasker-n", type=int, default=1,
@@ -173,44 +166,21 @@ Example:
     args = parser.parse_args()
     
     if args.command == 'annotate':
-        if not (args.bed or args.gff or args.tsv):
-            subparser.error("ERROR: At least one of --bed, --gff, or --tsv must be provided")
+        if not args.files:
+            subparser.error("ERROR: At least one annotation file must be provided with --files")
         
-        # Check that all file types have corresponding names
-        if args.bed and not args.bed_names:
-            subparser.error("ERROR: Add shorthand name(s) for BED files with --bed-names (-bn)")
-        if args.gff and not args.gff_names:
-            subparser.error("ERROR: Add shorthand name(s) for GFF files with --gff-names (-gn)")
-        if args.tsv and not args.tsv_names:
-            subparser.error("ERROR: Add shorthand name(s) for TSV files with --tsv-names")
-            
-        # Check that number of names matches number of files
-        if args.bed_names and len(args.bed_names) != len(args.bed):
-            subparser.error(f"ERROR: Number of BED names ({len(args.bed_names)}) must match number of BED files ({len(args.bed)})")
-        if args.gff_names and len(args.gff_names) != len(args.gff):
-            subparser.error(f"ERROR: Number of GFF names ({len(args.gff_names)}) must match number of GFF files ({len(args.gff)})")
-        if args.tsv_names and len(args.tsv_names) != len(args.tsv):
-            subparser.error(f"ERROR: Number of TSV names ({len(args.tsv_names)}) must match number of TSV files ({len(args.tsv)})")
-
-        # Check for duplicate names within each file type
-        if args.bed_names and len(set(args.bed_names)) != len(args.bed_names):
-            subparser.error("ERROR: Duplicate names found in --bed-names. Names must be unique.")
-        if args.gff_names and len(set(args.gff_names)) != len(args.gff_names):
-            subparser.error("ERROR: Duplicate names found in --gff-names. Names must be unique.")
-        if args.tsv_names and len(set(args.tsv_names)) != len(args.tsv_names):
-            subparser.error("ERROR: Duplicate names found in --tsv-names. Names must be unique.")
-            
-        # Check for duplicate names across all file types
-        all_names = []
-        if args.bed_names:
-            all_names.extend(args.bed_names)
-        if args.gff_names:
-            all_names.extend(args.gff_names)
-        if args.tsv_names:
-            all_names.extend(args.tsv_names)
-            
-        if len(set(all_names)) != len(all_names):
-            subparser.error("ERROR: Names must be unique across all annotation file types.")
+        # Check that number of names matches number of files when names are provided
+        if args.names and len(args.names) != len(args.files):
+            subparser.error(f"ERROR: Number of names ({len(args.names)}) must match number of files ({len(args.files)})")
+        
+        # Check for duplicate names
+        if args.names and len(set(args.names)) != len(args.names):
+            subparser.error("ERROR: Duplicate names found in --names. Names must be unique.")
+        
+        # Validate that all files exist
+        for file_path in args.files:
+            if not os.path.exists(file_path):
+                subparser.error(f"ERROR: File does not exist: {file_path}")
     
     return args
 

@@ -91,12 +91,14 @@ class AnnotateConfig:
     vcf_input: Path
     output_dir: Path
     
-    # Annotation files
+    # Unified annotation files and names
+    annotation_files: List[Path] = None
+    annotation_names: List[str] = None
+    
+    # Internal organization by file type
     bed_files: List[Path] = None
     gff_files: List[Path] = None
     tsv_files: List[Path] = None
-    
-    # Annotation names
     bed_names: List[str] = None
     gff_names: List[str] = None
     tsv_names: List[str] = None
@@ -110,6 +112,27 @@ class AnnotateConfig:
     threads: int = 8
     rebuild: bool = False
 
+    @staticmethod
+    def _detect_file_type(file_path):
+        """Detect file type based on file extension.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            str: Detected file type ('bed', 'gff', or 'tsv')
+        """
+        file_str = str(file_path).lower()
+        if file_str.endswith(('.bed', '.bed.gz')):
+            return 'bed'
+        elif any(file_str.endswith(ext) for ext in ('.gff', '.gff3', '.gtf', '.gff.gz', '.gff3.gz', '.gtf.gz')):
+            return 'gff'
+        elif file_str.endswith(('.tsv', '.tsv.gz')):
+            return 'tsv'
+        else:
+            # For unknown extensions, default to TSV which is the most generic
+            return 'tsv'
+    
     @classmethod
     def from_args(cls, args):
         """Create AnnotateConfig instance from parsed command line arguments."""
@@ -125,44 +148,36 @@ class AnnotateConfig:
             rebuild=args.rebuild if hasattr(args, 'rebuild') else False
         )
         
-        # Handle bed and gff files and their names
-        if hasattr(args, 'bed') and args.bed:
-            config.bed_files = [Path(bed) for bed in args.bed]
-            # If names are provided, use them, otherwise use filenames
-            if hasattr(args, 'bed_names') and args.bed_names:
-                if len(args.bed_names) != len(args.bed):
-                    raise ValueError("Number of BED names must match number of BED files")
-                config.bed_names = args.bed_names
-            else:
-                config.bed_names = []
-        else:
-            config.bed_files = []
-            config.bed_names = []
-            
-        if hasattr(args, 'gff') and args.gff:
-            config.gff_files = [Path(gff) for gff in args.gff]
-            # If names are provided, use them, otherwise use filenames
-            if hasattr(args, 'gff_names') and args.gff_names:
-                if len(args.gff_names) != len(args.gff):
-                    raise ValueError("Number of GFF names must match number of GFF files")
-                config.gff_names = args.gff_names
-            else:
-                config.gff_names = []
-        else:
-            config.gff_files = []
-            config.gff_names = []
+        # Process unified files and names arguments
+        config.annotation_files = [Path(file) for file in args.files]
         
-        if hasattr(args, 'tsv') and args.tsv:
-            config.tsv_files = [Path(tsv) for tsv in args.tsv]
-            # If names are provided, use them, otherwise use filenames
-            if hasattr(args, 'tsv_names') and args.tsv_names:
-                if len(args.tsv_names) != len(args.tsv):
-                    raise ValueError("Number of TSV names must match number of TSV files")
-                config.tsv_names = args.tsv_names
-            else:
-                config.tsv_names = []
+        # If names are provided, use them, otherwise use filenames without extension
+        if args.names:
+            if len(args.names) != len(args.files):
+                raise ValueError("Number of names must match number of files")
+            config.annotation_names = args.names
         else:
-            config.tsv_files = []
-            config.tsv_names = []
+            # Default to using the file stem (filename without extension)
+            config.annotation_names = [Path(file).stem for file in args.files]
+        
+        # Categorize files by type
+        config.bed_files = []
+        config.bed_names = []
+        config.gff_files = []
+        config.gff_names = []
+        config.tsv_files = []
+        config.tsv_names = []
+        
+        for i, file_path in enumerate(config.annotation_files):
+            file_type = cls._detect_file_type(file_path)
+            if file_type == 'bed':
+                config.bed_files.append(file_path)
+                config.bed_names.append(config.annotation_names[i])
+            elif file_type == 'gff':
+                config.gff_files.append(file_path)
+                config.gff_names.append(config.annotation_names[i])
+            elif file_type == 'tsv':
+                config.tsv_files.append(file_path)
+                config.tsv_names.append(config.annotation_names[i])
             
         return config

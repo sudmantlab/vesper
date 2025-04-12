@@ -39,10 +39,9 @@ def run_refine(args, logger):
     """Run the refinement pipeline."""
     config = RefineConfig.from_args(args)
     
-    timestamp = datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
     if config.test_mode is not None:
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
-        print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
+        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Running in test mode (limited to {config.test_mode} variants)")
 
     # Create output directory if it doesn't exist
     if not config.output_dir.exists():
@@ -53,7 +52,7 @@ def run_refine(args, logger):
     variants = []
     with VCFProcessor(config.vcf_input, test_mode=config.test_mode) as vcf_proc:
         variants = list(vcf_proc.instantiate_variants())
-    print(f"{timestamp} - Loaded {len(variants)} variants")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Loaded {len(variants)} variants")
     logger.info(f"Loaded {len(variants)} variants")
 
     # TODO: set config options for memory
@@ -118,10 +117,10 @@ def run_refine(args, logger):
             logger.info(f"    High-confidence variants: {len(confident_variants)} ({pct_confident:.1f}%)")
         else:
             logger.warning("WARNING: No confidence scores calculated!")
-            print(f"{timestamp} - WARNING: No confidence scores calculated!")
+            print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - WARNING: No confidence scores calculated!")
 
-    print(f"{timestamp} - Completed refinement in {elapsed:.2f} seconds")
-    print(f"{timestamp} - Confidence score statistics:")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Completed refinement in {elapsed:.2f} seconds")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Confidence score statistics:")
     print(f"    Mean: {mean_conf:.3f}")
     print(f"    Median: {median_conf:.3f}")
     print(f"    Min: {min_conf:.3f}")
@@ -130,7 +129,7 @@ def run_refine(args, logger):
 
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.refined.vcf.gz')
     logger.info(f"Writing refined variants to {output_vcf_path}")
-    print(f"{timestamp} - Writing refined variants to {output_vcf_path}")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Writing refined variants to {output_vcf_path}")
     
     start_write_time = time.time()
     with Progress(
@@ -158,4 +157,4 @@ def run_refine(args, logger):
     VCFWriter.create_tabix_index(output_vcf_path)
     
     logger.info(f"Refinement pipeline completed successfully")
-    print(f"{timestamp} - Refinement pipeline completed successfully") 
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Refinement pipeline completed successfully") 

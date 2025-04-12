@@ -48,10 +48,9 @@ def run_annotate(args, logger):
     """Run the annotation pipeline."""
     config = AnnotateConfig.from_args(args)
 
-    timestamp = datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
     if config.test_mode is not None:
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
-        print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
+        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Running in test mode (limited to {config.test_mode} variants)")
         
     total_annotation_files = len(config.bed_files) + len(config.gff_files) + len(config.tsv_files)
     logger.info(f"Using {total_annotation_files} annotation file(s):")
@@ -88,7 +87,7 @@ def run_annotate(args, logger):
     
     
     start_time = time.time()
-    print(f"{timestamp} - Starting annotation pipeline")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Starting annotation pipeline")
     logger.info(f"Starting annotation pipeline")
     logger.info(f"Processing {len(chunks)} variant chunks with {n_workers} workers")
 
@@ -197,39 +196,39 @@ def run_annotate(args, logger):
     logger.info(f"Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     logger.info(f"Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     
-    print(f"{timestamp} - Completed annotation in {elapsed:.2f} seconds")
-    print(f"{timestamp} - Annotated {len(variants)} variants using {total_annotation_files} annotation file(s)")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Completed annotation in {elapsed:.2f} seconds")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Annotated {len(variants)} variants using {total_annotation_files} annotation file(s)")
     
     if config.bed_files:
-        print(f"{timestamp} - BED file(s) ({len(config.bed_files)}):")
+        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - BED file(s) ({len(config.bed_files)}):")
         for i, bed_file in enumerate(config.bed_files):
             bed_name = config.bed_names[i]
             print(f"  - {bed_file} (source: '{bed_name}')")
             
     if config.gff_files:
-        print(f"{timestamp} - GFF file(s) ({len(config.gff_files)}):")
+        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - GFF file(s) ({len(config.gff_files)}):")
         for i, gff_file in enumerate(config.gff_files):
             gff_name = config.gff_names[i]
             print(f"  - {gff_file} (source: '{gff_name}')")
             
     if config.tsv_files:
-        print(f"{timestamp} - TSV file(s) ({len(config.tsv_files)}):")
+        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - TSV file(s) ({len(config.tsv_files)}):")
         for i, tsv_file in enumerate(config.tsv_files):
             tsv_name = config.tsv_names[i]
             print(f"  - {tsv_file} (source: '{tsv_name}')")
             
-    print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
-    print(f"{timestamp} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     
     temp_jsons = glob(str(config.output_dir / 'repeatmasker' / '*.chunk_*.json'))
     repeatmasker_json_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.repeatmasker_output.json')
     logger.info(f"Merging {len(temp_jsons)} temporary JSON files into {repeatmasker_json_path}")
-    print(f"{timestamp} - Saving RepeatMasker results to {repeatmasker_json_path}")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Saving RepeatMasker results to {repeatmasker_json_path}")
     RepeatMaskerProcessor.merge_temp_jsons(config.output_dir / 'repeatmasker', repeatmasker_json_path)
     
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
     logger.info(f"Writing annotated variants to {output_vcf_path}")
-    print(f"{timestamp} - Writing annotated variants to {output_vcf_path}")
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Writing annotated variants to {output_vcf_path}")
     
     start_write_time = time.time()
     with Progress(
@@ -257,4 +256,4 @@ def run_annotate(args, logger):
     VCFWriter.create_tabix_index(output_vcf_path)
     
     logger.info(f"Annotation pipeline completed successfully")
-    print(f"{timestamp} - Annotation pipeline completed successfully") 
+    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Annotation pipeline completed successfully") 
