@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
 from vesper.processors.vcf import VCFProcessor, VCFWriter
-from vesper.processors.annotations import BEDProcessor, GFFProcessor
+from vesper.processors.annotations import BEDProcessor, GFFProcessor, TSVProcessor
 from vesper.processors.repeatmasker import RepeatMaskerProcessor
 from vesper.utils.config import AnnotateConfig
 
@@ -53,7 +53,7 @@ def run_annotate(args, logger):
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
         print(f"{timestamp} - Running in test mode (limited to {config.test_mode} variants)")
         
-    total_annotation_files = len(config.bed_files) + len(config.gff_files)
+    total_annotation_files = len(config.bed_files) + len(config.gff_files) + len(config.tsv_files)
     logger.info(f"Using {total_annotation_files} annotation file(s):")
     if config.bed_files:
         logger.info(f"BED file(s) ({len(config.bed_files)}):")
@@ -65,6 +65,11 @@ def run_annotate(args, logger):
         for i, gff_file in enumerate(config.gff_files):
             gff_name = config.gff_names[i] if config.gff_names and i < len(config.gff_names) else gff_file.stem
             logger.info(f"  - {gff_file} (source: '{gff_name}')")
+    if config.tsv_files:
+        logger.info(f"TSV file(s) ({len(config.tsv_files)}):")
+        for i, tsv_file in enumerate(config.tsv_files):
+            tsv_name = config.tsv_names[i] if config.tsv_names and i < len(config.tsv_names) else tsv_file.stem
+            logger.info(f"  - {tsv_file} (source: '{tsv_name}')")
 
     if not config.output_dir.exists():
         config.output_dir.mkdir(parents=True)
@@ -102,7 +107,7 @@ def run_annotate(args, logger):
             bed_name = config.bed_names[i]
             progress.update(task, description=f"Loading BED file: {bed_file.name} ({bed_name})")
             logger.info(f"Loading BED file: {bed_file.name} as '{bed_name}'")
-            annotation_procs.append(BEDProcessor(bed_file, source_name=bed_name))
+            annotation_procs.append(BEDProcessor(bed_file, source_name=bed_name, rebuild=config.rebuild))
             progress.update(task, advance=1)
         
         # Use GFF names from config (validation already ensures names are available)
@@ -111,7 +116,19 @@ def run_annotate(args, logger):
             gff_name = config.gff_names[i]
             progress.update(task, description=f"Loading GFF file: {gff_file.name} ({gff_name})")
             logger.info(f"Loading GFF file: {gff_file.name} as '{gff_name}'")
-            annotation_procs.append(GFFProcessor(gff_file, source_name=gff_name))
+            annotation_procs.append(GFFProcessor(gff_file, source_name=gff_name, rebuild=config.rebuild))
+            progress.update(task, advance=1)
+            
+        # Use TSV names from config (validation already ensures names are available)
+        for i, tsv_file in enumerate(config.tsv_files):
+            task = progress.add_task("[cyan]Loading TSV files...", total=len(config.tsv_files))
+            tsv_name = config.tsv_names[i]
+            progress.update(task, description=f"Loading TSV file: {tsv_file.name} ({tsv_name})")
+            logger.info(f"Loading TSV file: {tsv_file.name} as '{tsv_name}'")
+            
+            # Generic TSV processor with first row as header
+            annotation_procs.append(TSVProcessor(tsv_file, source_name=tsv_name, rebuild=config.rebuild))
+                
             progress.update(task, advance=1)
 
     with Progress(TextColumn("[bold blue]{task.description}"),
@@ -171,6 +188,12 @@ def run_annotate(args, logger):
             gff_name = config.gff_names[i]
             logger.info(f"  - {gff_file} (source: '{gff_name}')")
             
+    if config.tsv_files:
+        logger.info(f"TSV file(s) ({len(config.tsv_files)}):")
+        for i, tsv_file in enumerate(config.tsv_files):
+            tsv_name = config.tsv_names[i]
+            logger.info(f"  - {tsv_file} (source: '{tsv_name}')")
+            
     logger.info(f"Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     logger.info(f"Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     
@@ -188,6 +211,12 @@ def run_annotate(args, logger):
         for i, gff_file in enumerate(config.gff_files):
             gff_name = config.gff_names[i]
             print(f"  - {gff_file} (source: '{gff_name}')")
+            
+    if config.tsv_files:
+        print(f"{timestamp} - TSV file(s) ({len(config.tsv_files)}):")
+        for i, tsv_file in enumerate(config.tsv_files):
+            tsv_name = config.tsv_names[i]
+            print(f"  - {tsv_file} (source: '{tsv_name}')")
             
     print(f"{timestamp} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
     print(f"{timestamp} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 

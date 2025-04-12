@@ -94,10 +94,12 @@ class AnnotateConfig:
     # Annotation files
     bed_files: List[Path] = None
     gff_files: List[Path] = None
+    tsv_files: List[Path] = None
     
     # Annotation names
     bed_names: List[str] = None
     gff_names: List[str] = None
+    tsv_names: List[str] = None
     
     # Optional arguments
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
@@ -106,6 +108,7 @@ class AnnotateConfig:
     proximal_span: int = 100
     repeatmasker_n: int = 1 # number of top-scoring repeat annotations to return
     threads: int = 8
+    rebuild: bool = False
 
     @classmethod
     def from_args(cls, args):
@@ -118,7 +121,8 @@ class AnnotateConfig:
             test_mode=args.test_mode,
             proximal_span=args.proximal_span,
             repeatmasker_n=args.repeatmasker_n,
-            threads=get_threads(args.threads)
+            threads=get_threads(args.threads),
+            rebuild=args.rebuild if hasattr(args, 'rebuild') else False
         )
         
         # Handle bed and gff files and their names
@@ -147,5 +151,18 @@ class AnnotateConfig:
         else:
             config.gff_files = []
             config.gff_names = []
+        
+        if hasattr(args, 'tsv') and args.tsv:
+            config.tsv_files = [Path(tsv) for tsv in args.tsv]
+            # If names are provided, use them, otherwise use filenames
+            if hasattr(args, 'tsv_names') and args.tsv_names:
+                if len(args.tsv_names) != len(args.tsv):
+                    raise ValueError("Number of TSV names must match number of TSV files")
+                config.tsv_names = args.tsv_names
+            else:
+                config.tsv_names = []
+        else:
+            config.tsv_files = []
+            config.tsv_names = []
             
         return config
