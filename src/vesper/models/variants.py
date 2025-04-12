@@ -192,7 +192,7 @@ class VariantAnalysis:
         # Under the same assumption as above
         support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
         nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
-        softclip_ratio = max(1, support_pct / nonsupport_pct)
+        softclip_ratio = max(1, support_pct / max(nonsupport_pct, 0.0001)) # prevent division by zero
 
         # TODO: placeholder check for GTEx annotations in overlapping or proximal features
         gtex_multiplier = 1.0
@@ -219,7 +219,7 @@ class VariantAnalysis:
                 repeatmasker_multiplier = repeatmasker_multiplier * 0.5
         
         # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier * repeatmasker_multiplier)
+        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier * repeatmasker_multiplier * segdups_multiplier)
         self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
         
     def to_vcf_record(self) -> str:
