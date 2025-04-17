@@ -142,6 +142,8 @@ class VariantAnalysis:
     proximal_features: List[GenomicInterval] = field(default_factory=list)
     repeatmasker_results: List[RepeatMaskerResult] = field(default_factory=list)
     confidence: Optional[float] = None
+    confidence_flags: List[str] = field(default_factory=list)
+    filter: Optional[str] = None
 
     def __post_init__(self):
         if 'OVERLAPPING' in self.variant.info:
@@ -183,6 +185,13 @@ class VariantAnalysis:
             self.logger.warning(f"Missing metrics for variant {self.variant.ID}, skipping confidence calculation")
             self.confidence = 0.0
             return
+        
+        # immediately fail if all support reads are secondary/supplementary
+        if all(read.is_secondary or read.is_supplementary for read in self.support_reads.reads):
+            self.confidence = 0.0
+            self.confidence_flags.append('NO_PRIMARY_SUPPORT')
+            self.filter = 'NO_PRIMARY_SUPPORT'
+            return
             
         # Calculate mapq diff between support and nonsupport reads as a ratio between support and nonsupport
         # Under the assumption that support reads may have worse alignment quality
@@ -194,33 +203,54 @@ class VariantAnalysis:
         nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
         softclip_ratio = max(1, support_pct / max(nonsupport_pct, 0.0001)) # prevent division by zero
 
-        # TODO: placeholder check for GTEx annotations in overlapping or proximal features
-        gtex_multiplier = 1.0
-        for feature in self.overlapping_features:
-            if any('gtex' in str(v).lower() for v in feature.metadata.values()):
-                gtex_multiplier = 1.2
-                break
+        # overlapping feature check
 
+        # TODO: biggest issue is the "flexible" name alias system, which is currently optional during build 
+        # but will be fully enforced in the full annotation run
+        # TODO: placeholder check for GTEx annotations in overlapping or proximal features
         # TODO: placeholder check for segdups
-        segdups_multiplier = 1.0
-        for feature in self.overlapping_features:
-            if any('segdups' in str(v).lower() for v in feature.metadata.values()):
-                segdups_multiplier = 0.5
-                break
+        feature_multiplier = 1
+
+        feature_sources = [feature.source for feature in self.overlapping_features]
+        # TODO: subclass GenomicInterval to include repeatmasker specific metadata because this *will* need to be checked
+        overlap_repeatmasker = [f.metadata['name'] for f in self.overlapping_features if 'repeatmasker' in f.source]
+        proximal_repeatmasker = [f.metadata['name'] for f in self.proximal_features if 'repeatmasker' in f.source]
+        ins_repeatmasker = [f.repeat_name for f in self.repeatmasker_results]
+        if 'gtex' in feature_sources or 'gencode' in feature_sources:
+            feature_multiplier = feature_multiplier * 1.2
+            self.confidence_flags.append('IN_GENE')
         
-        # TODO: placeholder check for repeatmasker insertion annotations matching overlapping or proximal features
-        repeatmasker_multiplier = 1.0
-        if hasattr(self, 'repeatmasker_results') and self.repeatmasker_results:
-            for (i, j) in [('SINE/Alu', 'Alu'), ('LINE/L1', 'L1')]:
-                in_annotation = any(i in result.repeat_class for result in self.repeatmasker_results)
-                in_overlap = any(j in str(feature.metadata) for feature in self.overlapping_features)
-                
-            if in_annotation and in_overlap:
-                repeatmasker_multiplier = repeatmasker_multiplier * 0.5
+        if 'segdups' in feature_sources:
+            # TODO: subclass GenomicInterval to include segdup specific metadata because this *will* need to be checked
+            max_identity = max([float(sd.metadata['fracMatch']) for sd in self.overlapping_features if 'segdups' in sd.source])
+            if max_identity > 0.98:
+                feature_multiplier = feature_multiplier * 0.1
+                self.confidence_flags.append('IN_HIGH_SEGDUP')
+                self.filter = "IN_HIGH_SEGDUP"
+            elif 0.98 > max_identity > 0.9:
+                feature_multiplier = feature_multiplier * 0.8
+                self.confidence_flags.append('IN_MEDIUM_SEGDUP')
+            else:
+                feature_multiplier = feature_multiplier * 0.95
+                self.confidence_flags.append('IN_SEGDUP')
+        
+        if overlap_repeatmasker and ins_repeatmasker:
+            if any(rm in ins_repeatmasker for rm in proximal_repeatmasker):
+                feature_multiplier = feature_multiplier * 0.5
+                self.confidence_flags.append('REPEAT_PROXIMAL_MATCH')
+            elif any(rm in ins_repeatmasker for rm in overlap_repeatmasker):
+                feature_multiplier = feature_multiplier * 0.25
+                self.confidence_flags.append('REPEAT_OVERLAP_MATCH')
+                self.filter = "REPEAT_OVERLAP_MATCH"
+            elif any('L1' in rm for rm in overlap_repeatmasker) and any('L1' in rm for rm in ins_repeatmasker):
+                feature_multiplier = feature_multiplier * 1 #TODO: placeholder while examining performance
+                self.confidence_flags.append('L1_NESTING')
         
         # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * gtex_multiplier * repeatmasker_multiplier * segdups_multiplier)
-        self.confidence = weighted_score # TODO: add filtering as next method to mark low confidence variants
+        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * feature_multiplier)
+        self.confidence = weighted_score
+        if self.confidence <= 0.5 and self.filter is None: # no filter set yet but confidence score is low
+            self.filter = "LOW_CONFIDENCE_OTHER"
         
     def to_vcf_record(self) -> str:
         """Convert VariantAnalysis to a VCF line string.
@@ -229,13 +259,13 @@ class VariantAnalysis:
             String representation of the variant in VCF format
         """
         chrom = self.variant.chrom
-        pos = str(self.variant.position)
+        pos = self.variant.position
         id_field = self.variant.ID
         ref = self.variant.ref
         alt = self.variant.alt
         
-        qual = str(self.variant.qual) if self.variant.qual is not None else "."
-        filter_field = self.variant.filter
+        qual = self.variant.qual if self.variant.qual is not None else "."
+        filter_field = self.filter if self.filter else self.variant.filter
         
         # Start building INFO field
         info = []
@@ -249,6 +279,11 @@ class VariantAnalysis:
         # Only add confidence if it has been calculated
         if self.confidence is not None:
             info.append(f"CONFIDENCE={self.confidence:.2f}")
+            qual = round(self.confidence * float(qual), 0) # TODO: this is more or less a placeholder to modify the qual field
+            if self.confidence_flags:
+                info.append(f"CONFIDENCE_FLAGS={';'.join(self.confidence_flags)}")
+            else:
+                info.append("CONFIDENCE_FLAGS=NONE")
         
         # Add read group metrics to INFO field if available
         if self.metrics and 'comparison' in self.metrics:
@@ -289,6 +324,7 @@ class VariantAnalysis:
         format_field = "DR:DV"
         sample_field = f"{self.variant.DR}:{self.variant.DV}"
         
-        vcf_record = "\t".join([chrom, pos, id_field, ref, alt, qual, filter_field, info_field, format_field, sample_field])
+        record_fields = [chrom, pos, id_field, ref, alt, qual, filter_field, info_field, format_field, sample_field]
+        vcf_record = "\t".join([str(field) for field in record_fields])
         
         return vcf_record
