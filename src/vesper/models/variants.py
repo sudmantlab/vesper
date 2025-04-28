@@ -173,8 +173,6 @@ class VariantAnalysis:
         
         self.metrics['support_softclip'] = self.support_reads.soft_clip_stats
         self.metrics['nonsupport_softclip'] = self.nonsupport_reads.soft_clip_stats
-
-        self.metrics['comparison'] = self.support_reads.compare_stats(self.nonsupport_reads)
             
     def _calculate_confidence(self) -> None:
         """Basic confidence calculation based on mapq differential and softclipping.
@@ -183,6 +181,7 @@ class VariantAnalysis:
         """
         if not self.metrics:
             self.logger.warning(f"Missing metrics for variant {self.variant.ID}, skipping confidence calculation")
+            self.filter = 'NO_METRICS'
             self.confidence = 0.0
             return
         
@@ -193,15 +192,21 @@ class VariantAnalysis:
             self.filter = 'NO_PRIMARY_SUPPORT'
             return
             
+        quality_multiplier = 1
         # Calculate mapq diff between support and nonsupport reads as a ratio between support and nonsupport
         # Under the assumption that support reads may have worse alignment quality
-        mapq_ratio = max(1, self.metrics['comparison']['mapq_mean'] / self.metrics['comparison']['mapq_mean_other'])
+        mapq_ratio = max(1, self.metrics['support_mapq'] / self.metrics['nonsupport_mapq'])
+        if mapq_ratio < 0.8: # TODO: this is arbitrary
+            quality_multiplier = quality_multiplier * 0.8
+            self.confidence_flags.append(f'MAPQ_DIFF')
         
-        # Calculate softclip diff between support and nonsupport reads as a ratio between support and nonsupport
-        # Under the same assumption as above
-        support_pct = self.metrics['comparison']['softclip_stats']['pct_softclipped']
-        nonsupport_pct = self.metrics['comparison']['softclip_stats_other']['pct_softclipped']
-        softclip_ratio = max(1, support_pct / max(nonsupport_pct, 0.0001)) # prevent division by zero
+        # Calculate softclip diff between support and nonsupport reads as absolute difference
+        support_pct = self.metrics['support_softclip']['pct_softclipped']
+        nonsupport_pct = self.metrics['nonsupport_softclip']['pct_softclipped']
+        softclip_diff = abs(support_pct - nonsupport_pct)
+        if softclip_diff > 25: # TODO: this is arbitrary
+            quality_multiplier = quality_multiplier * 0.75
+            self.confidence_flags.append(f'SOFTCLIP_DIFF')
 
         # overlapping feature check
 
@@ -224,7 +229,7 @@ class VariantAnalysis:
             # TODO: subclass GenomicInterval to include segdup specific metadata because this *will* need to be checked
             max_identity = max([float(sd.metadata['fracMatch']) for sd in self.overlapping_features if 'segdups' in sd.source])
             if max_identity > 0.98:
-                feature_multiplier = feature_multiplier * 0.1
+                feature_multiplier = feature_multiplier * 0.65
                 self.confidence_flags.append('IN_HIGH_SEGDUP')
                 self.filter = "IN_HIGH_SEGDUP"
             elif 0.98 > max_identity > 0.9:
@@ -235,21 +240,21 @@ class VariantAnalysis:
                 self.confidence_flags.append('IN_SEGDUP')
         
         if overlap_repeatmasker and ins_repeatmasker:
-            if any(rm in ins_repeatmasker for rm in proximal_repeatmasker):
-                feature_multiplier = feature_multiplier * 0.5
+            primary_result = ins_repeatmasker[0]  # first entry = longest matched length
+            if any(rm in primary_result for rm in proximal_repeatmasker):
+                feature_multiplier = feature_multiplier * 0.8
                 self.confidence_flags.append('REPEAT_PROXIMAL_MATCH')
-            elif any(rm in ins_repeatmasker for rm in overlap_repeatmasker):
-                feature_multiplier = feature_multiplier * 0.25
+            elif any(rm in primary_result for rm in overlap_repeatmasker):
+                feature_multiplier = feature_multiplier * 0.5
                 self.confidence_flags.append('REPEAT_OVERLAP_MATCH')
-                self.filter = "REPEAT_OVERLAP_MATCH"
-            elif any('L1' in rm for rm in overlap_repeatmasker) and any('L1' in rm for rm in ins_repeatmasker):
+            elif any('L1' in rm for rm in overlap_repeatmasker) and 'L1' in primary_result:
                 feature_multiplier = feature_multiplier * 1 #TODO: placeholder while examining performance
                 self.confidence_flags.append('L1_NESTING')
         
         # TODO: smarter weighting
-        weighted_score = max(0, mapq_ratio * (1/softclip_ratio) * feature_multiplier)
+        weighted_score = 1 * quality_multiplier * feature_multiplier
         self.confidence = weighted_score
-        if self.confidence <= 0.5 and self.filter is None: # no filter set yet but confidence score is low
+        if self.confidence <= 0.3 and self.filter is None: # no filter set yet but confidence score is low
             self.filter = "LOW_CONFIDENCE_OTHER"
         
     def to_vcf_record(self) -> str:
@@ -286,11 +291,11 @@ class VariantAnalysis:
                 info.append("CONFIDENCE_FLAGS=NONE")
         
         # Add read group metrics to INFO field if available
-        if self.metrics and 'comparison' in self.metrics:
-            info.append(f"RMAPQ={self.metrics['comparison']['mapq_mean']:.0f}")
-            info.append(f"NSMAPQ={self.metrics['comparison']['mapq_mean_other']:.0f}")
-            info.append(f"RSFTCLIP={self.metrics['comparison']['softclip_stats']['pct_softclipped']:.1f}")
-            info.append(f"NSFTCLIP={self.metrics['comparison']['softclip_stats_other']['pct_softclipped']:.1f}")
+        if self.metrics:
+            info.append(f"RMAPQ={self.metrics['support_mapq']:.0f}")
+            info.append(f"NSMAPQ={self.metrics['nonsupport_mapq']:.0f}")
+            info.append(f"RSFTCLIP={self.metrics['support_softclip']['pct_softclipped']:.1f}")
+            info.append(f"NSFTCLIP={self.metrics['nonsupport_softclip']['pct_softclipped']:.1f}")
         
         # Add annotations to INFO field if available
         # TODO: Make this a general method for all annotations

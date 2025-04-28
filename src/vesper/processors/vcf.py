@@ -169,6 +169,7 @@ class VCFWriter:
             self.write_header_line(buffer, "INFO=<ID=NSMAPQ,Number=1,Type=Float,Description=\"Nonsupporting read mapping qualities\">")
             self.write_header_line(buffer, "INFO=<ID=NSFTCLIP,Number=1,Type=Float,Description=\"Nonsupporting read soft-clipping stats\">")
             self.write_header_line(buffer, "INFO=<ID=CONFIDENCE,Number=1,Type=Float,Description=\"Confidence score for the variant\">")
+            self.write_header_line(buffer, "INFO=<ID=CONFIDENCE_FLAGS,Number=.,Type=String,Description=\"Flags indicating features considered in confidence calculation\">")
             self.write_header_line(buffer, "INFO=<ID=OVERLAPPING,Number=.,Type=String,Description=\"Overlapping annotated features\">")
             self.write_header_line(buffer, "INFO=<ID=PROXIMAL,Number=.,Type=String,Description=\"Proximal annotated features\">")
             self.write_header_line(buffer, "INFO=<ID=REPEATMASKER_RESULTS,Number=.,Type=String,Description=\"Repetitive sequence motifs identified via RepeatMasker (insertion only)\">")

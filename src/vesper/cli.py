@@ -101,8 +101,8 @@ Examples:
                                 help="Shorthand names for annotation files. Must match number of files.")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
-    annotate_parser.add_argument("--repeatmasker-n", type=int, default=1,
-                                help="Number of top-scoring repeat annotations to return (default: 1)")
+    annotate_parser.add_argument("--repeatmasker-n", type=int, default=0,
+                                help="Number of top-scoring repeat annotations to return per insertion (default: return all annotations)")
     annotate_parser.add_argument("--threads", "-t", type=str, default="8",
                                 help="Number of threads to use (integer or 'auto' (defaults to 2x CPU count, up to 32), default: 8)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,

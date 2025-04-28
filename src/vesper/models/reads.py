@@ -140,21 +140,3 @@ class ReadGroup:
             for op, count in r.cigar_stats.items():
                 total_cigar_stats[op] = total_cigar_stats.get(op, 0) + count
         return total_cigar_stats
-
-    def compare_stats(self, other: 'ReadGroup') -> Dict[str, float]:
-        """Calculate comparison statistics between this read group and another.
-        
-        Args:
-            other: Another ReadGroup to compare against
-            
-        Returns:
-            Dictionary of comparison statistics between the two read groups
-        """
-        return {
-            'mapq_mean': self.mean_mapq,
-            'mapq_mean_other': other.mean_mapq,
-            'softclip_stats': self.soft_clip_stats,
-            'softclip_stats_other': other.soft_clip_stats,
-            'cigar_stats': self.cigar_stats,
-            'cigar_stats_other': other.cigar_stats
-        }

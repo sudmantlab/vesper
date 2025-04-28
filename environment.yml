@@ -19,3 +19,4 @@ dependencies:
   - repeatmasker
   - trf
   - rmblast
+  - bcftools

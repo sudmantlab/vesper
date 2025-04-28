@@ -108,7 +108,7 @@ class AnnotateConfig:
     debug: bool = False
     test_mode: Optional[int] = None
     proximal_span: int = 100
-    repeatmasker_n: int = 1 # number of top-scoring repeat annotations to return
+    repeatmasker_n: Optional[int] = None # number of top-scoring repeat annotations to return (None = all)
     threads: int = 8
     rebuild: bool = False
 
@@ -143,7 +143,7 @@ class AnnotateConfig:
             debug=args.debug,
             test_mode=args.test_mode,
             proximal_span=args.proximal_span,
-            repeatmasker_n=args.repeatmasker_n,
+            repeatmasker_n=args.repeatmasker_n if args.repeatmasker_n > 0 else None, # Interpret 0 from CLI as None (keep all)
             threads=get_threads(args.threads),
             rebuild=args.rebuild if hasattr(args, 'rebuild') else False
         )

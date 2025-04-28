@@ -240,7 +240,7 @@ class RepeatMaskerProcessor:
                         repeat_start=repeat_start,
                         repeat_end=repeat_end,
                         repeat_left=repeat_left,
-                        match_length=query_end - query_begin + 1,
+                        match_length=round(query_end - query_begin + 1, 2),
                         match_coverage=(query_end - query_begin + 1) / (query_end + query_left),
                     )
                     
@@ -275,31 +275,34 @@ class RepeatMaskerProcessor:
             if not annotations: # insertion seq not IDed w/ repetitive motif
                 continue
                 
-            sorted_annotations = sorted(annotations, key=lambda x: (x.match_length, -x.divergence), reverse=False)
+            sorted_annotations = sorted(annotations, key=lambda x: (x.match_length), reverse=True)
             sorted_results[query_name] = sorted_annotations
         
         return sorted_results
     
-    def assign_results(self, variant_id: str, results: Dict[str, List[RepeatMaskerResult]], n: int = 1) -> List[RepeatMaskerResult]:
-        """Query RepeatMasker results for the given variant ID and return the top n results.
+    def assign_results(self, variant_id: str, results: Dict[str, List[RepeatMaskerResult]], n: Optional[int] = None) -> List[RepeatMaskerResult]:
+        """Query RepeatMasker results for the given variant ID and optionally return the top n results.
         
         Args:
             variant_id: ID of the variant to query
             results: Dictionary mapping sequence IDs to repeat annotations
+            n: Optional number of top results to return. If None, returns all results.
             
         Returns:
             List of RepeatMaskerResult objects corresponding to the variant ID
         """
         if variant_id in results:
-            return results[variant_id][:n]
-        else:
-            return []
+            if n is not None:
+                return results[variant_id][:n]
+            return results[variant_id]
+        return []
     
-    def batch_analysis(self, variants: List[VariantAnalysis], chunk_idx: int, n: int = 1) -> None:
+    def batch_analysis(self, variants: List[VariantAnalysis], chunk_idx: int, n: Optional[int] = None) -> None:
         """Analyze a batch of variants with RepeatMasker.
         
         Args:
             variants: List of variants to analyze
+            n: Optional number of top results to return. If None, returns all results.
         """
         if not variants:
             return
