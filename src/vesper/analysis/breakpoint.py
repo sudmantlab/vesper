@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 import re
 import pysam
 from collections import Counter
@@ -11,12 +11,14 @@ from ..models.reads import AlignedRead
 @dataclass
 class BreakpointContext:
     """Represents the referencesequence context around a variant breakpoint."""
-    left_context: str  # Sequence upstream of breakpoint
-    right_context: str  # Sequence downstream of breakpoint
+    left_ref_context: str  # Reference sequence upstream of breakpoint
+    right_ref_context: str  # Reference sequence downstream of breakpoint
     breakpoint_pos: int  # Position of the breakpoint
     microhomology: Optional[str] = None  # Microhomology sequence if present
     tsd: Optional[str] = None  # Target site duplication if present
     poly_a_tail: Optional[str] = None  # Poly-A tail if present
+
+    support_reads: Optional[List[AlignedRead]] = None  # (Debug only) List of supporting reads
 
 # pysam CIGAR operation codes: BAM_CMATCH 0, BAM_CINS 1, BAM_CDEL 2, BAM_CREF_SKIP 3,
 # BAM_CSOFT_CLIP 4, BAM_CHARD_CLIP 5, BAM_CPAD 6, BAM_CEQUAL 7, BAM_CDIFF 8
@@ -26,7 +28,7 @@ CIGAR_CONSUMES_QUERY = {0, 1, 4, 7, 8} # M, I, S, =, X
 class BreakpointAnalyzer:
     """Analyzes breakpoint contexts for structural variants."""
     
-    def __init__(self, reference_fasta: str, context_size: int = 25, max_edit: int = 1):
+    def __init__(self, reference_fasta: str, context_size: int = 25, max_edit: int = 1, debug: bool = False):
         """
         Args:
             reference_fasta: Path to reference genome FASTA file (must be indexed, e.g., with samtools faidx)
@@ -35,6 +37,7 @@ class BreakpointAnalyzer:
         self.context_size = context_size
         self.max_edit = max_edit
         self.reference_fasta = pysam.FastaFile(reference_fasta)
+        self.debug = debug # returns read sequences in BreakpointContext
         
     def _get_reference_sequence(self, chrom: str, start: int, end: int) -> str:
         """Get reference sequence for a genomic region using pysam."""
@@ -129,8 +132,8 @@ class BreakpointAnalyzer:
         # Return 0-based, exclusive end coordinates
         return start_pos, end_pos_inclusive + 1, alignment_length
     
-    def extract_context(self, variant: Variant) -> BreakpointContext:
-        """Extract sequence context around variant breakpoint."""
+    def extract_ref_context(self, variant: Variant) -> BreakpointContext:
+        """Extract reference sequence context around variant breakpoint."""
         # For insertions, the breakpoint is at the insertion point
         # For deletions, it's at the start and end of the deletion
         # For other SV types, we need to handle them appropriately
@@ -139,15 +142,15 @@ class BreakpointAnalyzer:
             start = max(0, variant.position - self.context_size)
             end = variant.position + self.context_size
             ref_seq = self._get_reference_sequence(variant.chrom, start, end)
-            left_context = ref_seq[:self.context_size]
-            right_context = ref_seq[-self.context_size:]
+            left_ref_context = ref_seq[:self.context_size]
+            right_ref_context = ref_seq[-self.context_size:]
             breakpoint_pos = variant.position
         else:
             raise NotImplementedError(f"SV type {variant.sv_type} not supported (yet).") # TODO: idk this shouldn't be a problem but hold for now
             
         return BreakpointContext(
-            left_context=left_context,
-            right_context=right_context,
+            left_ref_context=left_ref_context,
+            right_ref_context=right_ref_context,
             breakpoint_pos=breakpoint_pos
         )
     
@@ -193,8 +196,8 @@ class BreakpointAnalyzer:
             A tuple of (True, microhomology_sequence, microhomology_length, (left_microhomology_start, right_microhomology_start)) if microhomology is found.
             Else (False, 0, 0, (0, 0)).
         """
-        left = context.left_context
-        right = context.right_context
+        left = context.left_ref_context
+        right = context.right_ref_context
         
         LCS, LCS_len, left_start, right_start = self._longest_common_substring(left, right)
 
@@ -267,28 +270,33 @@ class BreakpointAnalyzer:
             if coords is None:
                 continue # Cannot determine insertion boundaries in this read
 
-            ins_start_in_read, ins_end_in_read = coords
-            ins_len = ins_end_in_read - ins_start_in_read # avoid bugs where SVLEN != read ins seq
-            query_start, query_end = variant_analysis.repeatmasker_results[0].query_start, variant_analysis.repeatmasker_results[0].query_end
             read_seq = read.sequence
             read_len = len(read_seq)
 
-            lw_start = max(0, ins_start_in_read + query_start - self.context_size) # start upstream of query start
-            lw_end = lw_start + self.context_size 
+            ins_start_in_read, ins_end_in_read = coords
+            ins_len = ins_end_in_read - ins_start_in_read # avoid bugs where SVLEN != read ins seq
+            query_start, query_end = variant_analysis.repeatmasker_results[0].query_start, variant_analysis.repeatmasker_results[0].query_end
+
+            lw_start = max(0, ins_start_in_read - self.context_size) # start upstream of ins start - in case query is downstream of ins (ex. minus strand insertion)
+            lw_end = ins_start_in_read + query_start # end at query start (match does not include TSD)
             left_window = read_seq[lw_start:lw_end]
 
-            if context.poly_a_tail[0]: # use poly-A tail as window start
-                poly_a_start, poly_a_end = context.poly_a_tail[2][0], context.poly_a_tail[2][1]
-                if variant_analysis.repeatmasker_results[0].strand == 'C': # orient poly-A relative to ins
-                    poly_a_start, poly_a_end = ins_len - poly_a_end, ins_len - poly_a_start
-                rw_start = ins_start_in_read + poly_a_end # start at poly-A tail end
-                rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of poly-A tail end
-                right_window = read_seq[rw_start:rw_end]
-            else: # use query end as window start
-                rw_start = ins_start_in_read + query_end # start at query end
-                rw_end =min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
-                right_window = read_seq[rw_start:rw_end]
-
+            # if context.poly_a_tail[0]: # use poly-A tail as window start
+            #     poly_a_start, poly_a_end = context.poly_a_tail[2][0], context.poly_a_tail[2][1]
+            #     if variant_analysis.repeatmasker_results[0].strand == 'C': # orient poly-A relative to ins
+            #         poly_a_start, poly_a_end = ins_len - poly_a_end, ins_len - poly_a_start
+            #     rw_start = ins_start_in_read + poly_a_end
+            #     rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of poly-A tail end
+            #     right_window = read_seq[rw_start:rw_end]
+            # else: # use query end as window start
+                # rw_start = ins_start_in_read + query_end
+                # rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
+                # right_window = read_seq[rw_start:rw_end]
+            
+            rw_start = ins_start_in_read + query_end
+            rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
+            right_window = read_seq[rw_start:rw_end]
+            
             if not left_window or not right_window: # Skip if windows are empty
                 continue
 
@@ -375,57 +383,88 @@ class BreakpointAnalyzer:
         # If loop finishes for ALL reads without finding a TSD:
         return (False, None, None, None, 0, (0, 0))
 
-    def detect_poly_a_tail(self, variant: Variant) -> Optional[str]:
-        """Detect poly-A tail in insertion sequence."""
-        if variant.sv_type != SVType.INS:
-            print('test')
-            return None
+    def _gap_extend(self, seed_char: str, seed_len: int, sequence: str, min_total_length: int, max_impurity: float) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
+        """Gap extend a seed pattern in a sequence."""
+        seed_pattern = re.compile(seed_char * seed_len)
+        match = seed_pattern.search(sequence)
 
-        alt_seq = variant.alt
-        seed_pattern = re.compile(r'A{10}')
-        match = seed_pattern.search(alt_seq)
-        
         if match:
             start = match.start()
             end = match.end()
-            
-            while end < len(alt_seq):
-                if alt_seq[end:end+2] == 'AA':
-                    end += 2
-                elif alt_seq[end] == 'A':
-                    end += 1
-                    break
+
+            # Extend backwards
+            pos = start - 1
+            impure_count = 0
+            impure_ratio = 0
+            while pos >= 0 and (impure_count/(end - pos + 1)) <= max_impurity:
+                if sequence[pos] == seed_char:
+                    start = pos
                 else:
-                    break
-            
-            return (True, len(alt_seq[start:end]), (start, end))
+                    impure_count += 1
+                    impure_ratio = impure_count/(end - pos + 1)
+                    if impure_ratio > max_impurity:
+                        break
+                    start = pos  # Include the gap
+                pos -= 1
+
+            # Extend forwards
+            pos = end
+            impure_count = 0
+            impure_ratio = 0
+            while pos < len(sequence) and (impure_count/(pos - start + 1)) <= max_impurity:
+                if sequence[pos] == seed_char:
+                    end = pos
+                else:
+                    impure_count += 1
+                    impure_ratio = impure_count/(pos - start + 1)
+                    if impure_ratio > max_impurity:
+                        break
+                    end = pos
+                pos += 1
+        
+            if end - start >= min_total_length:
+                matched = sequence[start:end]
+
+                # Shrink ends to exclude non-matching (impure) bases
+                while matched[0] != seed_char:
+                    matched = matched[1:]
+                    start += 1
+                while matched[-1] != seed_char:
+                    matched = matched[:-1]
+                    end -= 1
+                
+                # Calculate final impurity ratio
+                impure_count = len(matched) - matched.count(seed_char)
+                impure_ratio = impure_count/len(matched)
+
+                return (True, matched, (start, end), len(matched), impure_ratio)
+        else:
+            return (False, None, (0, 0), 0, 0)
+
+    def detect_poly_a_tail(self, variant: Variant, min_total_length: int = 10, max_impurity: float = 0.20) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
+        """Detect poly-A tail in insertion sequence."""
+        if variant.sv_type != SVType.INS:
+            return (False, None, (0, 0), 0)
+
+        alt_seq = variant.alt
+        
+        # first try with poly-A
+        tail = self._gap_extend('A', 10, alt_seq, min_total_length, max_impurity)
+        if tail[0]:
+            return tail
         else:
             # Try searching for poly-T stretches
-            seed_pattern_t = re.compile(r'T{10}')
-            match_t = seed_pattern_t.search(alt_seq)
-            
-            if match_t:
-                start = match_t.start()
-                end = match_t.end()
-                
-                while end < len(alt_seq):
-                    if alt_seq[end:end+2] == 'TT':
-                        end += 2
-                    elif alt_seq[end] == 'T':
-                        end += 1
-                        break
-                    else:
-                        break
-                
-                return (True, len(alt_seq[start:end]), (start, end))
-            
-            return (False, None, (0, 0))
+            tail = self._gap_extend('T', 10, alt_seq, min_total_length, max_impurity)            
+            return tail
     
     def analyze_breakpoint(self, variant_analysis: VariantAnalysis) -> BreakpointContext:
         """Perform comprehensive breakpoint analysis."""
-        context = self.extract_context(variant_analysis.variant)
+        context = self.extract_ref_context(variant_analysis.variant)
         
         context.microhomology = self.detect_microhomology(context)
         context.poly_a_tail = self.detect_poly_a_tail(variant_analysis.variant)
         context.tsd = self.detect_tsd(context, variant_analysis, max_edit = self.max_edit)
+        if self.debug:
+            context.support_reads = variant_analysis.support_reads
+
         return context 

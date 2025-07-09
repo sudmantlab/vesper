@@ -20,7 +20,8 @@ dependencies = [
     "pydantic==2.10.6",
     "pydantic-core==2.27.2",
     "annotated-types==0.7.0",
-    "typing-extensions==4.12.2"
+    "typing-extensions==4.12.2",
+    "edlib==1.3.9.post1"
 ]
 
 [project.optional-dependencies]

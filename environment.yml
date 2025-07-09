@@ -3,20 +3,22 @@ channels:
   - bioconda
   - conda-forge
 dependencies:
-  - pip
-  - uv
-  - python==3.12.8
-  - h5py
-  - numpy
-  - pandas
-  - pydantic
-  - pytest
-  - pysam
-  - rich
-  - rich-argparse
-  - annotated-types
-  - typing-extensions
-  - repeatmasker
-  - trf
-  - rmblast
-  - bcftools
+  - python>=3.10
+  - pip==25.1.1
+  - uv==0.6.11
+  - h5py==3.13.0
+  - pydantic==2.10.6
+  - bedtools==2.31.1
+  - samtools==1.22
+  - bcftools==1.22
+  - pysam==0.23.3
+  - pandas==2.3.0
+  - numpy==2.3.1
+  - pytest==8.4.1
+  - rich==1.7.0
+  - rich-argparse==1.7.0
+  - annotated-types==0.7.0
+  - typing-extensions==4.12.2
+  - repeatmasker==4.1.8
+  - trf==4.09.1
+  - rmblast==2.14.1
