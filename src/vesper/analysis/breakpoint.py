@@ -28,14 +28,13 @@ CIGAR_CONSUMES_QUERY = {0, 1, 4, 7, 8} # M, I, S, =, X
 class BreakpointAnalyzer:
     """Analyzes breakpoint contexts for structural variants."""
     
-    def __init__(self, reference_fasta: str, context_size: int = 25, max_edit: int = 1, debug: bool = False):
+    def __init__(self, reference_fasta: str, context_size: int = 25, debug: bool = False):
         """
         Args:
             reference_fasta: Path to reference genome FASTA file (must be indexed, e.g., with samtools faidx)
             context_size: Number of bases to extract on each side of breakpoint
         """
         self.context_size = context_size
-        self.max_edit = max_edit
         self.reference_fasta = pysam.FastaFile(reference_fasta)
         self.debug = debug # returns read sequences in BreakpointContext
         
@@ -236,7 +235,7 @@ class BreakpointAnalyzer:
                     return True
         return False
     
-    def detect_tsd(self, context: BreakpointContext, variant_analysis: VariantAnalysis, min_len: int = 7, max_len: int = 20, max_edit: int = 1) -> Tuple[bool, bool, str, int, Tuple[int, int]]:
+    def detect_tsd(self, context: BreakpointContext, variant_analysis: VariantAnalysis, min_len: int = 7, max_len: int = 20) -> Tuple[bool, bool, str, int, Tuple[int, int]]:
         """
         Detect target site duplication (TSD) allowing for an edit distance of 1.
         Checks for potential TSDs flanking the insertion site in supporting reads.
@@ -248,7 +247,7 @@ class BreakpointAnalyzer:
             max_len: Maximum length of TSD to consider.
 
         Returns:
-            1) A tuple of (True, edit_distance, left_tsd_sequence, right_tsd_sequence, tsd_len, (left_tsd_start_rel, right_tsd_start_rel)) if a TSD is found.
+            1) A tuple of (True, left_tsd_sequence, right_tsd_sequence, tsd_len, (left_tsd_start_rel, right_tsd_start_rel)) if a TSD is found.
             left_tsd_start_rel and right_tsd_start_rel are the positions of the TSD relative to the breakpoint context start.
             Else 3) (False, None, None, None, 0, (0, 0)) if no TSD is found.
         """
@@ -261,11 +260,11 @@ class BreakpointAnalyzer:
             # Prioritize CIGAR-based insertion finding
             cigar_insertion = self._find_insertion_in_read(read, variant.sv_length)
             if cigar_insertion:
-                coords = (cigar_insertion[0], cigar_insertion[1]) # [start, end)
+                coords = (cigar_insertion[0] - 1, cigar_insertion[1] - 1) # [start, end)
             else: # Fallback to sequence alignment if CIGAR doesn't give a clear insertion
                 align_insertion = self._find_insertion_by_sequence(read, variant.alt)
                 if align_insertion:
-                    coords = (align_insertion[0], align_insertion[1]) # [start, end)
+                    coords = (align_insertion[0] - 1, align_insertion[1] - 1) # [start, end)
 
             if coords is None:
                 continue # Cannot determine insertion boundaries in this read
@@ -293,17 +292,17 @@ class BreakpointAnalyzer:
                 # rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
                 # right_window = read_seq[rw_start:rw_end]
             
+            # use query end as window start
             rw_start = ins_start_in_read + query_end
             rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
             right_window = read_seq[rw_start:rw_end]
-            
+
             if not left_window or not right_window: # Skip if windows are empty
                 continue
 
             best_exact_match = None
             best_inexact_match = None
 
-            # --- Pass 1: Search for the longest EXACT match (k=0) ---
             for tsd_len in range(max_len, min_len - 1, -1):
                 if best_exact_match: break # Already found the longest possible exact match
                 # Iterate starting positions in right_window
@@ -333,73 +332,40 @@ class BreakpointAnalyzer:
 
                             # Store if neither sequence is a homopolymer
                             if not self._is_homopolymer(left_tsd_sequence, threshold = 1.0) and not self._is_homopolymer(substring_right, threshold = 0.8):
-                                best_exact_match = (True, 0, left_tsd_sequence, substring_right, tsd_len, (left_tsd_start_rel, right_tsd_start_rel))
+                                best_exact_match = (True, left_tsd_sequence, substring_right, tsd_len, (left_tsd_start_rel, right_tsd_start_rel), (ins_start_in_read, ins_end_in_read))
                                 break # Found longest non-homopolymer exact match
             
             # If an exact match was found, return it immediately for this read
             if best_exact_match:
                 return best_exact_match
-            
-            # --- Pass 2: Search for the longest INEXACT match (k=max_edit) --- 
-            # This part only runs if no exact match was found in Pass 1
-            for tsd_len in range(max_len, min_len - 1, -1):
-                if best_inexact_match: break # Already found the longest possible inexact match
-                for j in range(len(right_window) - tsd_len + 1):
-                    substring_right = right_window[j : j + tsd_len]
-                    try:
-                        # Align substring_right (query) against left_window (target)
-                        result = edlib.align(substring_right, left_window, mode="HW", task="locations", k=max_edit)
-                    except ValueError:
-                        continue 
-
-                    edit_distance = result.get('editDistance', -1)
-                    # Check if a valid *inexact* alignment was found (must be > 0 and <= max_edit)
-                    if 0 < edit_distance <= max_edit:
-                        locations = result.get('locations')
-                        if locations:
-                            # Match position is in left_window
-                            left_tsd_start_in_window = locations[0][0] 
-                            # Query position is in right_window
-                            right_tsd_start_in_window = j
-                            
-                            left_tsd_start_rel = (lw_start + left_tsd_start_in_window) - ins_start_in_read
-                            right_tsd_start_rel = (rw_start + right_tsd_start_in_window) - ins_end_in_read
-                            
-                            # Extract the matched sequence from the left window
-                            target_start, target_end = locations[0]
-                            left_tsd_sequence = left_window[target_start : target_end + 1]
-                            
-                            # # Store if neither sequence is a homopolymer
-                            if not self._is_homopolymer(left_tsd_sequence, threshold = 1.0) and not self._is_homopolymer(substring_right, threshold = 0.8):
-                                best_inexact_match = (True, edit_distance, left_tsd_sequence, substring_right, tsd_len, (left_tsd_start_rel, right_tsd_start_rel))
-                                break # Found longest non-homopolymer inexact match
-
-            # If an inexact match was found (and no exact one was), return it
-            if best_inexact_match:
-                return best_inexact_match
 
             # If loop finishes for THIS read without finding any suitable TSD, continue to next read
 
         # If loop finishes for ALL reads without finding a TSD:
-        return (False, None, None, None, 0, (0, 0))
+        return (False, None, None, 0, (0, 0), (0, 0))
 
-    def _gap_extend(self, seed_char: str, seed_len: int, sequence: str, min_total_length: int, max_impurity: float) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
+    def _gap_extend(self, seed_char: str, seed_len: int, sequence: str, min_total_length: int, max_impurity: float, left_bound: int, right_bound: int, max_local_impurity: int = 4) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
         """Gap extend a seed pattern in a sequence."""
         seed_pattern = re.compile(seed_char * seed_len)
         match = seed_pattern.search(sequence)
+
+         # TODO: Fix poly-A tail detection to use full read seq rather than insertion seq to account for imperfect breakpoint calling
 
         if match:
             start = match.start()
             end = match.end()
 
             # Extend backwards
-            pos = start - 1
+            pos = max(start, left_bound + 1)
             impure_count = 0
             impure_ratio = 0
-            while pos >= 0 and (impure_count/(end - pos + 1)) <= max_impurity:
+            local_impure = 0
+            while pos > left_bound and (impure_count/(end - pos + 1)) <= max_impurity and local_impure <= max_local_impurity:
                 if sequence[pos] == seed_char:
                     start = pos
+                    local_impure = 0
                 else:
+                    local_impure += 1
                     impure_count += 1
                     impure_ratio = impure_count/(end - pos + 1)
                     if impure_ratio > max_impurity:
@@ -411,10 +377,13 @@ class BreakpointAnalyzer:
             pos = end
             impure_count = 0
             impure_ratio = 0
-            while pos < len(sequence) and (impure_count/(pos - start + 1)) <= max_impurity:
+            local_impure = 0
+            while pos < right_bound and (impure_count/(pos - start + 1)) <= max_impurity and local_impure <= max_local_impurity:
                 if sequence[pos] == seed_char:
                     end = pos
+                    local_impure = 0
                 else:
+                    local_impure += 1
                     impure_count += 1
                     impure_ratio = impure_count/(pos - start + 1)
                     if impure_ratio > max_impurity:
@@ -423,6 +392,8 @@ class BreakpointAnalyzer:
                 pos += 1
         
             if end - start >= min_total_length:
+                # adjust end so full tail included with end-exclusive range
+                end += 1
                 matched = sequence[start:end]
 
                 # Shrink ends to exclude non-matching (impure) bases
@@ -437,24 +408,38 @@ class BreakpointAnalyzer:
                 impure_count = len(matched) - matched.count(seed_char)
                 impure_ratio = impure_count/len(matched)
 
+                # # adjust end so full tail included with end-exclusive range
+                # end += 1
+                matched = sequence[start:end]
+
                 return (True, matched, (start, end), len(matched), impure_ratio)
         else:
             return (False, None, (0, 0), 0, 0)
 
-    def detect_poly_a_tail(self, variant: Variant, min_total_length: int = 10, max_impurity: float = 0.20) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
+    def detect_poly_a_tail(self, context: BreakpointContext, variant_analysis: VariantAnalysis, min_total_length: int = 10, max_impurity: float = 0.20) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
         """Detect poly-A tail in insertion sequence."""
+        variant = variant_analysis.variant
         if variant.sv_type != SVType.INS:
             return (False, None, (0, 0), 0)
-
-        alt_seq = variant.alt
         
+        alt_seq = variant.alt
+        tsd_len, left_tsd_start = context.tsd[3], context.tsd[4][0]
+        left_tsd_end = left_tsd_start + tsd_len
+        original_strand, query_start = variant_analysis.repeatmasker_results[0].strand, variant_analysis.repeatmasker_results[0].query_start
+
+        # take into account TSD positions
+        if original_strand == 'C': # prevent poly-A tail from extending into left TSD by setting bounds
+            left_bound, right_bound = left_tsd_end, len(alt_seq)
+        else:
+            left_bound, right_bound = 0, len(alt_seq)
+
         # first try with poly-A
-        tail = self._gap_extend('A', 10, alt_seq, min_total_length, max_impurity)
+        tail = self._gap_extend('A', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)
         if tail[0]:
             return tail
         else:
             # Try searching for poly-T stretches
-            tail = self._gap_extend('T', 10, alt_seq, min_total_length, max_impurity)            
+            tail = self._gap_extend('T', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)            
             return tail
     
     def analyze_breakpoint(self, variant_analysis: VariantAnalysis) -> BreakpointContext:
@@ -462,8 +447,8 @@ class BreakpointAnalyzer:
         context = self.extract_ref_context(variant_analysis.variant)
         
         context.microhomology = self.detect_microhomology(context)
-        context.poly_a_tail = self.detect_poly_a_tail(variant_analysis.variant)
-        context.tsd = self.detect_tsd(context, variant_analysis, max_edit = self.max_edit)
+        context.tsd = self.detect_tsd(context, variant_analysis)
+        context.poly_a_tail = self.detect_poly_a_tail(context, variant_analysis)
         if self.debug:
             context.support_reads = variant_analysis.support_reads
 
