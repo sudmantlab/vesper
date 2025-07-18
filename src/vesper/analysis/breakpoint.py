@@ -10,13 +10,16 @@ from ..models.reads import AlignedRead
 
 @dataclass
 class BreakpointContext:
-    """Represents the referencesequence context around a variant breakpoint."""
+    """Represents the sequence context around a variant breakpoint."""
     left_ref_context: str  # Reference sequence upstream of breakpoint
     right_ref_context: str  # Reference sequence downstream of breakpoint
-    breakpoint_pos: int  # Position of the breakpoint
-    microhomology: Optional[str] = None  # Microhomology sequence if present
-    tsd: Optional[str] = None  # Target site duplication if present
-    poly_a_tail: Optional[str] = None  # Poly-A tail if present
+    ref_breakpoint_pos: int  # Position of the breakpoint
+
+    read_name: Optional[str] = None  # Name of supporting read
+    read_seq: Optional[str] = None  # Sequence of supporting read
+    read_ins_coords: Optional[Tuple[int, int]] = None  # Insertion coordinates in supporting read
+    tsd: Optional[Tuple[bool, str, str, int, Tuple[int, int]]] = None  # Target site duplication if present
+    poly_a_tail: Optional[Tuple[bool, str, Tuple[int, int], int]] = None  # Poly-A tail if present
 
     support_reads: Optional[List[AlignedRead]] = None  # (Debug only) List of supporting reads
 
@@ -143,14 +146,14 @@ class BreakpointAnalyzer:
             ref_seq = self._get_reference_sequence(variant.chrom, start, end)
             left_ref_context = ref_seq[:self.context_size]
             right_ref_context = ref_seq[-self.context_size:]
-            breakpoint_pos = variant.position
+            ref_breakpoint_pos = variant.position
         else:
             raise NotImplementedError(f"SV type {variant.sv_type} not supported (yet).") # TODO: idk this shouldn't be a problem but hold for now
             
         return BreakpointContext(
             left_ref_context=left_ref_context,
             right_ref_context=right_ref_context,
-            breakpoint_pos=breakpoint_pos
+            ref_breakpoint_pos=ref_breakpoint_pos
         )
     
     def _longest_common_substring(self, left: str, right: str) -> Optional[str]:
@@ -182,30 +185,31 @@ class BreakpointAnalyzer:
 
         return (max_substring, len(max_substring), left_start, right_start)
     
-    def detect_microhomology(self, context: BreakpointContext, min_len: int = 4, max_len: int = 50) -> Optional[str]:
-        """
-        Detect microhomology at breakpoint by finding longest common substring.
+    # def detect_microhomology(self, context: BreakpointContext, min_len: int = 4, max_len: int = 50) -> Optional[str]:
+    #     """
+    #     Detect microhomology at breakpoint by finding longest common substring.
+    #     Currently broken.
 
-        Args:
-            context: BreakpointContext object containing left and right context sequences
-            min_len: Minimum length of microhomology to detect
-            max_len: Maximum length of microhomology to detect
+    #     Args:
+    #         context: BreakpointContext object containing left and right context sequences
+    #         min_len: Minimum length of microhomology to detect
+    #         max_len: Maximum length of microhomology to detect
 
-        Returns:
-            A tuple of (True, microhomology_sequence, microhomology_length, (left_microhomology_start, right_microhomology_start)) if microhomology is found.
-            Else (False, 0, 0, (0, 0)).
-        """
-        left = context.left_ref_context
-        right = context.right_ref_context
+    #     Returns:
+    #         A tuple of (True, microhomology_sequence, microhomology_length, (left_microhomology_start, right_microhomology_start)) if microhomology is found.
+    #         Else (False, 0, 0, (0, 0)).
+    #     """
+    #     left = context.left_ref_context
+    #     right = context.right_ref_context
         
-        LCS, LCS_len, left_start, right_start = self._longest_common_substring(left, right)
+    #     LCS, LCS_len, left_start, right_start = self._longest_common_substring(left, right)
 
-        if LCS and max_len >= LCS_len >= min_len:
-            # previously returned absolute coordinates, switch to relative
-            # return (True, LCS, LCS_len, (context.breakpoint_pos - self.context_size + left_start, context.breakpoint_pos + right_start))
-            return (True, LCS, LCS_len, (-self.context_size + left_start, right_start))
-        else:
-            return (False, 0, 0, (0, 0))
+    #     if LCS and max_len >= LCS_len >= min_len:
+    #         # previously returned absolute coordinates, switch to relative
+    #         # return (True, LCS, LCS_len, (context.ref_breakpoint_pos - self.context_size + left_start, context.ref_breakpoint_pos + right_start))
+    #         return (True, LCS, LCS_len, (-self.context_size + left_start, right_start))
+    #     else:
+    #         return (False, 0, 0, (0, 0))
         
     def _is_homopolymer(self, sequence, threshold=0.7):
         """
@@ -235,6 +239,29 @@ class BreakpointAnalyzer:
                     return True
         return False
     
+    def _get_supporting_read(self, context: BreakpointContext, variant_analysis: VariantAnalysis) -> Tuple[int, int]:
+        """Find valid supporting read for analysis by searching for valid insertion coordinates in read."""
+        variant, coords = variant_analysis.variant, None
+        if variant.sv_type != SVType.INS:
+            return coords
+        
+        for read in variant_analysis.support_reads.reads:
+            read_name = read.name
+            read_seq = read.sequence
+            # Prioritize CIGAR-based insertion finding
+            cigar_insertion = self._find_insertion_in_read(read, variant.sv_length)
+            if cigar_insertion:
+                coords = (cigar_insertion[0] - 1, cigar_insertion[1] - 1) # [start, end)
+            else: # Fallback to sequence alignment if CIGAR doesn't give a clear insertion
+                align_insertion = self._find_insertion_by_sequence(read, variant.alt)
+                if align_insertion:
+                    coords = (align_insertion[0] - 1, align_insertion[1] - 1) # [start, end)
+        
+        context.read_name = read_name
+        context.read_seq = read_seq
+        context.read_ins_coords = coords
+        return context
+    
     def detect_tsd(self, context: BreakpointContext, variant_analysis: VariantAnalysis, min_len: int = 7, max_len: int = 20) -> Tuple[bool, bool, str, int, Tuple[int, int]]:
         """
         Detect target site duplication (TSD) allowing for an edit distance of 1.
@@ -253,96 +280,70 @@ class BreakpointAnalyzer:
         """
         variant = variant_analysis.variant
         if variant.sv_type != SVType.INS or not variant_analysis.support_reads or not variant_analysis.support_reads.reads:
-            return (False, False, "", 0, (0, 0)) # Return type adjusted
+            return (False, None, "", 0, (0, 0)) # Return type adjusted
 
-        for read in variant_analysis.support_reads.reads:
-            coords = None
-            # Prioritize CIGAR-based insertion finding
-            cigar_insertion = self._find_insertion_in_read(read, variant.sv_length)
-            if cigar_insertion:
-                coords = (cigar_insertion[0] - 1, cigar_insertion[1] - 1) # [start, end)
-            else: # Fallback to sequence alignment if CIGAR doesn't give a clear insertion
-                align_insertion = self._find_insertion_by_sequence(read, variant.alt)
-                if align_insertion:
-                    coords = (align_insertion[0] - 1, align_insertion[1] - 1) # [start, end)
+        coords = context.read_ins_coords
+        if coords is None:
+            return (False, None, "", 0, (0, 0)) # Return type adjusted
 
-            if coords is None:
-                continue # Cannot determine insertion boundaries in this read
+        read_seq = context.read_seq
+        read_len = len(read_seq)
 
-            read_seq = read.sequence
-            read_len = len(read_seq)
+        ins_start_in_read, ins_end_in_read = coords
+        ins_len = ins_end_in_read - ins_start_in_read # avoid bugs where SVLEN != read ins seq
+        query_start, query_end = variant_analysis.repeatmasker_results[0].query_start, variant_analysis.repeatmasker_results[0].query_end
 
-            ins_start_in_read, ins_end_in_read = coords
-            ins_len = ins_end_in_read - ins_start_in_read # avoid bugs where SVLEN != read ins seq
-            query_start, query_end = variant_analysis.repeatmasker_results[0].query_start, variant_analysis.repeatmasker_results[0].query_end
+        lw_start = max(0, ins_start_in_read - self.context_size) # start upstream of ins start - in case query is downstream of ins (ex. minus strand insertion)
+        lw_end = ins_start_in_read + query_start # end at query start (match does not include TSD)
+        left_window = read_seq[lw_start:lw_end]
+        
+        # use query end as window start
+        rw_start = ins_start_in_read + query_end
+        rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
+        right_window = read_seq[rw_start:rw_end]
 
-            lw_start = max(0, ins_start_in_read - self.context_size) # start upstream of ins start - in case query is downstream of ins (ex. minus strand insertion)
-            lw_end = ins_start_in_read + query_start # end at query start (match does not include TSD)
-            left_window = read_seq[lw_start:lw_end]
+        if not left_window or not right_window: # Skip if windows are empty
+            return (False, None, "", 0, (0, 0)) # Return type adjusted
 
-            # if context.poly_a_tail[0]: # use poly-A tail as window start
-            #     poly_a_start, poly_a_end = context.poly_a_tail[2][0], context.poly_a_tail[2][1]
-            #     if variant_analysis.repeatmasker_results[0].strand == 'C': # orient poly-A relative to ins
-            #         poly_a_start, poly_a_end = ins_len - poly_a_end, ins_len - poly_a_start
-            #     rw_start = ins_start_in_read + poly_a_end
-            #     rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of poly-A tail end
-            #     right_window = read_seq[rw_start:rw_end]
-            # else: # use query end as window start
-                # rw_start = ins_start_in_read + query_end
-                # rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
-                # right_window = read_seq[rw_start:rw_end]
-            
-            # use query end as window start
-            rw_start = ins_start_in_read + query_end
-            rw_end = min(read_len, max(ins_end_in_read + self.context_size, rw_start + self.context_size)) # end downstream of query end
-            right_window = read_seq[rw_start:rw_end]
+        best_exact_match = None
 
-            if not left_window or not right_window: # Skip if windows are empty
-                continue
+        for tsd_len in range(max_len, min_len - 1, -1):
+            if best_exact_match: break # Already found the longest possible exact match
+            # Iterate starting positions in right_window
+            for j in range(len(right_window) - tsd_len + 1):
+                substring_right = right_window[j : j + tsd_len]
+                try:
+                    # Align substring_right (query) against left_window (target)
+                    result = edlib.align(substring_right, left_window, mode="HW", task="locations", k=0)
+                except ValueError:
+                    return (False, None, "", 0, (0, 0)) # Return type adjusted
 
-            best_exact_match = None
-            best_inexact_match = None
+                edit_distance = result.get('editDistance', -1)
+                if edit_distance == 0: # Found exact match
+                    locations = result.get('locations')
+                    if locations:
+                        # Match position is in left_window
+                        left_tsd_start_in_window = locations[0][0] 
+                        # Query position is in right_window
+                        right_tsd_start_in_window = j
+                        
+                        left_tsd_start_rel = (lw_start + left_tsd_start_in_window) - ins_start_in_read
+                        right_tsd_start_rel = (rw_start + right_tsd_start_in_window) - ins_end_in_read
+                        
+                        # Extract the matched sequence from the left window
+                        target_start, target_end = locations[0]
+                        left_tsd_sequence = left_window[target_start : target_end + 1]
 
-            for tsd_len in range(max_len, min_len - 1, -1):
-                if best_exact_match: break # Already found the longest possible exact match
-                # Iterate starting positions in right_window
-                for j in range(len(right_window) - tsd_len + 1):
-                    substring_right = right_window[j : j + tsd_len]
-                    try:
-                        # Align substring_right (query) against left_window (target)
-                        result = edlib.align(substring_right, left_window, mode="HW", task="locations", k=0)
-                    except ValueError:
-                        continue
+                        # Store if neither sequence is a homopolymer
+                        if not self._is_homopolymer(left_tsd_sequence, threshold = 1.0) and not self._is_homopolymer(substring_right, threshold = 0.8):
+                            best_exact_match = (True, left_tsd_sequence, substring_right, tsd_len, (left_tsd_start_rel, right_tsd_start_rel))
+                            break # Found longest non-homopolymer exact match
+        
+        # If an exact match was found, return it immediately for this read
+        if best_exact_match:
+            return best_exact_match
 
-                    edit_distance = result.get('editDistance', -1)
-                    if edit_distance == 0: # Found exact match
-                        locations = result.get('locations')
-                        if locations:
-                            # Match position is in left_window
-                            left_tsd_start_in_window = locations[0][0] 
-                            # Query position is in right_window
-                            right_tsd_start_in_window = j
-                            
-                            left_tsd_start_rel = (lw_start + left_tsd_start_in_window) - ins_start_in_read
-                            right_tsd_start_rel = (rw_start + right_tsd_start_in_window) - ins_end_in_read
-                            
-                            # Extract the matched sequence from the left window
-                            target_start, target_end = locations[0]
-                            left_tsd_sequence = left_window[target_start : target_end + 1]
-
-                            # Store if neither sequence is a homopolymer
-                            if not self._is_homopolymer(left_tsd_sequence, threshold = 1.0) and not self._is_homopolymer(substring_right, threshold = 0.8):
-                                best_exact_match = (True, left_tsd_sequence, substring_right, tsd_len, (left_tsd_start_rel, right_tsd_start_rel), (ins_start_in_read, ins_end_in_read))
-                                break # Found longest non-homopolymer exact match
-            
-            # If an exact match was found, return it immediately for this read
-            if best_exact_match:
-                return best_exact_match
-
-            # If loop finishes for THIS read without finding any suitable TSD, continue to next read
-
-        # If loop finishes for ALL reads without finding a TSD:
-        return (False, None, None, 0, (0, 0), (0, 0))
+        return (False, None, "", 0, (0, 0)) # Return type adjusted
 
     def _gap_extend(self, seed_char: str, seed_len: int, sequence: str, min_total_length: int, max_impurity: float, left_bound: int, right_bound: int, max_local_impurity: int = 4) -> Optional[Tuple[bool, str, Tuple[int, int], int]]:
         """Gap extend a seed pattern in a sequence."""
@@ -425,28 +426,23 @@ class BreakpointAnalyzer:
         alt_seq = variant.alt
         tsd_len, left_tsd_start = context.tsd[3], context.tsd[4][0]
         left_tsd_end = left_tsd_start + tsd_len
-        original_strand, query_start = variant_analysis.repeatmasker_results[0].strand, variant_analysis.repeatmasker_results[0].query_start
+        original_strand = variant_analysis.repeatmasker_results[0].strand
 
         # take into account TSD positions
         if original_strand == 'C': # prevent poly-A tail from extending into left TSD by setting bounds
             left_bound, right_bound = left_tsd_end, len(alt_seq)
+            tail = self._gap_extend('T', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)  
         else:
             left_bound, right_bound = 0, len(alt_seq)
-
-        # first try with poly-A
-        tail = self._gap_extend('A', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)
-        if tail[0]:
-            return tail
-        else:
-            # Try searching for poly-T stretches
-            tail = self._gap_extend('T', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)            
-            return tail
+            tail = self._gap_extend('A', 10, alt_seq, min_total_length, max_impurity, left_bound, right_bound)
+          
+        return tail
     
     def analyze_breakpoint(self, variant_analysis: VariantAnalysis) -> BreakpointContext:
         """Perform comprehensive breakpoint analysis."""
         context = self.extract_ref_context(variant_analysis.variant)
-        
-        context.microhomology = self.detect_microhomology(context)
+        context = self._get_supporting_read(context, variant_analysis)
+        # context.microhomology = self.detect_microhomology(context)
         context.tsd = self.detect_tsd(context, variant_analysis)
         context.poly_a_tail = self.detect_poly_a_tail(context, variant_analysis)
         if self.debug:
