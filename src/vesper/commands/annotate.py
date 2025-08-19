@@ -9,10 +9,10 @@ from glob import glob
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
-from vesper.processors.vcf import VCFProcessor, VCFWriter
 from vesper.processors.annotations import BEDProcessor, GFFProcessor, TSVProcessor
 from vesper.processors.repeatmasker import RepeatMaskerProcessor
 from vesper.utils.config import AnnotateConfig
+from vesper.utils.common import load_variants, calculate_chunks, setup_output_directory, write_vcf_with_progress
 
 def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: int, config: AnnotateConfig, logger: logging.Logger) -> None:
     """Process a chunk of variants through the annotation pipeline.
@@ -72,20 +72,12 @@ def run_annotate(args, logger):
             tsv_name = config.tsv_names[i] if config.tsv_names and i < len(config.tsv_names) else tsv_file.stem
             logger.info(f"  - {tsv_file} (source: '{tsv_name}')")
 
-    if not config.output_dir.exists():
-        config.output_dir.mkdir(parents=True)
-        logger.info(f"Created output directory: {config.output_dir}")
-    
-    logger.info(f"Loading variants from {config.vcf_input}")
-    variants = []
-    with VCFProcessor(config.vcf_input, test_mode=config.test_mode) as vcf_proc:
-        variants = list(vcf_proc.instantiate_variants())
-    logger.info(f"Loaded {len(variants)} variants")
+    setup_output_directory(config.output_dir, logger)
+    variants = load_variants(config.vcf_input, config.test_mode, logger)
     
     # TODO: set config options for memory, etc.
     n_threads = config.threads
-    chunk_size = max(10, len(variants) // (n_threads * 16)) # smaller chunks for more granular progress updates
-    chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
+    chunks, chunk_size = calculate_chunks(variants, n_threads)
     
     
     start_time = time.time()
@@ -211,32 +203,7 @@ def run_annotate(args, logger):
     RepeatMaskerProcessor.merge_temp_jsons(config.output_dir / 'repeatmasker', repeatmasker_json_path)
     
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
-    logger.info(f"Writing annotated variants to {output_vcf_path}")
-    
-    start_write_time = time.time()
-    with Progress(
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(complete_style="green"), 
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn()
-    ) as progress, VCFWriter(output_vcf_path) as vcf_writer:
-        
-        task = progress.add_task("[cyan]Writing annotated variants...", total=len(variants))
-        vcf_writer.write_header(variants)
-        
-        for i, variant in enumerate(variants):
-            vcf_writer.write_record(variant)
-            progress.update(task, advance=1)
-            
-            if (i + 1) % 100 == 0:
-                logger.debug(f"Wrote {i + 1}/{len(variants)} variants")
-    
-    write_elapsed = time.time() - start_write_time
-    logger.info(f"Completed writing VCF in {write_elapsed:.2f} seconds")
-    
-    logger.info(f"Creating tabix index for {output_vcf_path}")
-    VCFWriter.create_tabix_index(output_vcf_path)
+    write_vcf_with_progress(output_vcf_path, variants, logger)
     
     logger.info(f"Annotation pipeline completed successfully")
     print(f"Wrote {len(variants)} variants to {output_vcf_path}")
