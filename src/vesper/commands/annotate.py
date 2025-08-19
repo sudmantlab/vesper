@@ -50,7 +50,6 @@ def run_annotate(args, logger):
 
     if config.test_mode is not None:
         logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Running in test mode (limited to {config.test_mode} variants)")
         
     total_annotation_files = len(config.bed_files) + len(config.gff_files) + len(config.tsv_files)
     if total_annotation_files > 0:
@@ -84,22 +83,23 @@ def run_annotate(args, logger):
     logger.info(f"Loaded {len(variants)} variants")
     
     # TODO: set config options for memory, etc.
-    n_workers = config.threads
-    chunk_size = max(10, len(variants) // (n_workers * 16)) # smaller chunks for more granular progress updates
+    n_threads = config.threads
+    chunk_size = max(10, len(variants) // (n_threads * 16)) # smaller chunks for more granular progress updates
     chunks = [variants[i:i + chunk_size] for i in range(0, len(variants), chunk_size)]
     
     
     start_time = time.time()
-    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Starting annotation pipeline")
     logger.info(f"Starting annotation pipeline")
-    logger.info(f"Processing {len(chunks)} variant chunks with {n_workers} workers")
+    logger.info(f"Using {n_threads} threads for parallel processing")
+    logger.info(f"Processing {len(chunks)} variant chunks")
+    logger.debug(f"Spawning {n_threads} threads for parallel processing")
 
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
                  TaskProgressColumn(),
                  TimeElapsedColumn(),
                  TimeRemainingColumn()) as progress, \
-         ThreadPoolExecutor(max_workers=n_workers) as executor:
+         ThreadPoolExecutor(max_workers=n_threads) as executor:
 
         annotation_procs = []
         
@@ -138,7 +138,7 @@ def run_annotate(args, logger):
                  TaskProgressColumn(),
                  TimeElapsedColumn(),
                  TimeRemainingColumn()) as progress, \
-         ThreadPoolExecutor(max_workers=n_workers) as executor:
+         ThreadPoolExecutor(max_workers=n_threads) as executor:
         
         # Open all annotation processors using context managers (if any)
         # repeatmasker processor is opened within each batch
@@ -171,6 +171,7 @@ def run_annotate(args, logger):
                     logger.error(f"Error processing chunk: {str(e)}")
                     raise
         finally:
+            logger.debug("All threads completed, closing thread pool")
             for proc in annotation_procs:
                 proc.__exit__(None, None, None)
     
@@ -203,43 +204,14 @@ def run_annotate(args, logger):
         logger.info(f"Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
         logger.info(f"Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
     
-    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Completed annotation in {elapsed:.2f} seconds")
-    if total_annotation_files > 0:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Annotated {len(variants)} variants with RepeatMasker and {total_annotation_files} external annotation file(s)")
-    else:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Annotated {len(variants)} variants with RepeatMasker")
-    
-    if config.bed_files:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - BED file(s) ({len(config.bed_files)}):")
-        for i, bed_file in enumerate(config.bed_files):
-            bed_name = config.bed_names[i]
-            print(f"  - {bed_file} (source: '{bed_name}')")
-            
-    if config.gff_files:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - GFF file(s) ({len(config.gff_files)}):")
-        for i, gff_file in enumerate(config.gff_files):
-            gff_name = config.gff_names[i]
-            print(f"  - {gff_file} (source: '{gff_name}')")
-            
-    if config.tsv_files:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - TSV file(s) ({len(config.tsv_files)}):")
-        for i, tsv_file in enumerate(config.tsv_files):
-            tsv_name = config.tsv_names[i]
-            print(f"  - {tsv_file} (source: '{tsv_name}')")
-            
-    if total_annotation_files > 0:
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Mean overlapping features: {sum(len(v.overlapping_features) for v in variants)/len(variants):.1f}") 
-        print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Mean proximal features: {sum(len(v.proximal_features) for v in variants)/len(variants):.1f}") 
-    
     temp_jsons = glob(str(config.output_dir / 'repeatmasker' / '*.chunk_*.json'))
     repeatmasker_json_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.repeatmasker_output.json')
     logger.info(f"Merging {len(temp_jsons)} temporary JSON files into {repeatmasker_json_path}")
-    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Saving RepeatMasker results to {repeatmasker_json_path}")
+    logger.info(f"Saving RepeatMasker results to {repeatmasker_json_path}")
     RepeatMaskerProcessor.merge_temp_jsons(config.output_dir / 'repeatmasker', repeatmasker_json_path)
     
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
     logger.info(f"Writing annotated variants to {output_vcf_path}")
-    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Writing annotated variants to {output_vcf_path}")
     
     start_write_time = time.time()
     with Progress(
@@ -257,7 +229,7 @@ def run_annotate(args, logger):
             vcf_writer.write_record(variant)
             progress.update(task, advance=1)
             
-            if (i + 1) % 1000 == 0:
+            if (i + 1) % 100 == 0:
                 logger.debug(f"Wrote {i + 1}/{len(variants)} variants")
     
     write_elapsed = time.time() - start_write_time
@@ -267,4 +239,4 @@ def run_annotate(args, logger):
     VCFWriter.create_tabix_index(output_vcf_path)
     
     logger.info(f"Annotation pipeline completed successfully")
-    print(f"{datetime.now().strftime('%m/%d/%Y %I:%M:%S %p')} - Annotation pipeline completed successfully") 
+    print(f"Wrote {len(variants)} variants to {output_vcf_path}")
