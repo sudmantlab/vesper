@@ -53,3 +53,6 @@ tests/files/
 
 # Temporary files/directories
 RM_*/
+
+# Snakemake cache
+.snakemake/
