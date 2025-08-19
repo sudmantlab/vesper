@@ -175,9 +175,9 @@ class VariantAnalysis:
         self.metrics['nonsupport_softclip'] = self.nonsupport_reads.soft_clip_stats
             
     def _calculate_confidence(self) -> None:
-        """Basic confidence calculation based on mapq differential and softclipping.
+        """Calculate confidence based on read quality metrics only.
         
-        Should be called after _calculate_grouped_metrics() and adding annotations.
+        Should be called after _calculate_grouped_metrics().
         """
         if not self.metrics:
             self.logger.warning(f"Missing metrics for variant {self.variant.ID}, skipping confidence calculation")
@@ -192,70 +192,26 @@ class VariantAnalysis:
             self.filter = 'NO_PRIMARY_SUPPORT'
             return
             
-        quality_multiplier = 1
+        quality_multiplier = 1.0
         # Calculate mapq diff between support and nonsupport reads as a ratio between support and nonsupport
         # Under the assumption that support reads may have worse alignment quality
-        mapq_ratio = max(1, self.metrics['support_mapq'] / self.metrics['nonsupport_mapq'])
-        if mapq_ratio < 0.8: # TODO: this is arbitrary
+        mapq_ratio = self.metrics['support_mapq'] / max(1, self.metrics['nonsupport_mapq'])
+        if mapq_ratio < 0.8:
             quality_multiplier = quality_multiplier * 0.8
-            self.confidence_flags.append(f'MAPQ_DIFF')
+            self.confidence_flags.append('MAPQ_DIFF')
         
         # Calculate softclip diff between support and nonsupport reads as absolute difference
         support_pct = self.metrics['support_softclip']['pct_softclipped']
         nonsupport_pct = self.metrics['nonsupport_softclip']['pct_softclipped']
         softclip_diff = abs(support_pct - nonsupport_pct)
-        if softclip_diff > 25: # TODO: this is arbitrary
+        if softclip_diff > 25:
             quality_multiplier = quality_multiplier * 0.75
-            self.confidence_flags.append(f'SOFTCLIP_DIFF')
+            self.confidence_flags.append('SOFTCLIP_DIFF')
 
-        # overlapping feature check
-
-        # TODO: biggest issue is the "flexible" name alias system, which is currently optional during build 
-        # but will be fully enforced in the full annotation run
-        # TODO: placeholder check for GTEx annotations in overlapping or proximal features
-        # TODO: placeholder check for segdups
-        feature_multiplier = 1
-
-        feature_sources = [feature.source for feature in self.overlapping_features]
-        # TODO: subclass GenomicInterval to include repeatmasker specific metadata because this *will* need to be checked
-        overlap_repeatmasker = [f.metadata['name'] for f in self.overlapping_features if 'repeatmasker' in f.source]
-        proximal_repeatmasker = [f.metadata['name'] for f in self.proximal_features if 'repeatmasker' in f.source]
-        ins_repeatmasker = [f.repeat_name for f in self.repeatmasker_results]
-        if 'gtex' in feature_sources or 'gencode' in feature_sources:
-            feature_multiplier = feature_multiplier * 1.2
-            self.confidence_flags.append('IN_GENE')
-        
-        if 'segdups' in feature_sources:
-            # TODO: subclass GenomicInterval to include segdup specific metadata because this *will* need to be checked
-            max_identity = max([float(sd.metadata['fracMatch']) for sd in self.overlapping_features if 'segdups' in sd.source])
-            if max_identity > 0.98:
-                feature_multiplier = feature_multiplier * 0.65
-                self.confidence_flags.append('IN_HIGH_SEGDUP')
-                self.filter = "IN_HIGH_SEGDUP"
-            elif 0.98 > max_identity > 0.9:
-                feature_multiplier = feature_multiplier * 0.8
-                self.confidence_flags.append('IN_MEDIUM_SEGDUP')
-            else:
-                feature_multiplier = feature_multiplier * 0.95
-                self.confidence_flags.append('IN_SEGDUP')
-        
-        if overlap_repeatmasker and ins_repeatmasker:
-            primary_result = ins_repeatmasker[0]  # first entry = longest matched length
-            if any(rm in primary_result for rm in proximal_repeatmasker):
-                feature_multiplier = feature_multiplier * 0.8
-                self.confidence_flags.append('REPEAT_PROXIMAL_MATCH')
-            elif any(rm in primary_result for rm in overlap_repeatmasker):
-                feature_multiplier = feature_multiplier * 0.5
-                self.confidence_flags.append('REPEAT_OVERLAP_MATCH')
-            elif any('L1' in rm for rm in overlap_repeatmasker) and 'L1' in primary_result:
-                feature_multiplier = feature_multiplier * 1 #TODO: placeholder while examining performance
-                self.confidence_flags.append('L1_NESTING')
-        
-        # TODO: smarter weighting
-        weighted_score = 1 * quality_multiplier * feature_multiplier
-        self.confidence = weighted_score
-        if self.confidence <= 0.3 and self.filter is None: # no filter set yet but confidence score is low
-            self.filter = "LOW_CONFIDENCE_OTHER"
+        # Calculate final confidence score based on read quality only
+        self.confidence = quality_multiplier
+        if self.confidence <= 0.3 and self.filter is None:
+            self.filter = "LOW_CONFIDENCE"
         
     def to_vcf_record(self) -> str:
         """Convert VariantAnalysis to a VCF line string.

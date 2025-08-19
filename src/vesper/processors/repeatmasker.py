@@ -35,9 +35,8 @@ class RepeatMaskerProcessor:
         self.repeatmasker_dir = output_dir / "repeatmasker"
         self.current_temp_dir = None
         
-        if not self.repeatmasker_dir.exists():
-            self.repeatmasker_dir.mkdir(parents=True)
-            self.logger.info(f"Created RepeatMasker output directory: {self.repeatmasker_dir}")
+        self.repeatmasker_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"Created RepeatMasker output directory: {self.repeatmasker_dir}")
     
     def __enter__(self):
         return self

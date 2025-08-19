@@ -36,8 +36,8 @@ def parse_args():
     vesper call (optional + not yet available) → vesper annotate → vesper refine
 
     - vesper call: provide a FASTQ file of PacBio HiFi reads for alignment and variant calling.
-    - vesper annotate: provide a VCF file of candidate variants to be annotated.
-    - vesper refine: provide a VCF file of annotated candidate variants and the origin BAM file.
+    - vesper annotate: provide a VCF file to annotate insertions with RepeatMasker (external annotations optional).
+    - vesper refine: provide a VCF file and BAM to calculate read-based confidence scores.
 
     View inputs & arguments for each command with vesper {command} --help.
         """
@@ -70,23 +70,23 @@ Example:
 
     # vesper annotate
     annotate_parser = subparsers.add_parser('annotate',
-        help='Annotate variants with genomic features',
-        description='Annotate structural variants with overlapping genomic features.',
+        help='Annotate insertion variants with RepeatMasker and optionally with genomic features',
+        description='Annotate insertion sequences with RepeatMasker and optionally overlay genomic features.',
         formatter_class=parser.formatter_class,
         epilog = """
 Usage notes:
-  - Provide annotation files with --files (file format is auto-detected by extension)
-  - Use --names to provide shorthand names for each file (optional, defaults to filenames)
+  - RepeatMasker is automatically run on all insertion sequences
+  - External annotation files are OPTIONAL - provide with --files (format auto-detected by extension)
+  - Use --names to provide shorthand names for each file (required if --files is used)
   - Names must be unique across all annotation files
 
 Examples:
-  # Single annotation file
-  vesper annotate --vcf input.vcf --files annotations.bed --names repeats --output-dir output/
-  vesper annotate --vcf input.vcf --files annotations.gff3.gz --names genes --output-dir output/
+  # Run RepeatMasker only (default behavior)
+  vesper annotate --vcf input.vcf --output-dir output/
   
-  # Multiple annotation files
-  vesper annotate --vcf input.vcf --files annotations1.bed annotations2.bed --names repeats centromeres --output-dir output/
-  vesper annotate --vcf input.vcf --files annotations1.gff3.gz annotations2.tsv --names genes features --output-dir output/
+  # Add external annotations
+  vesper annotate --vcf input.vcf --files annotations.bed --names repeats --output-dir output/
+  vesper annotate --vcf input.vcf --files annotations1.bed annotations2.gff3.gz --names repeats genes --output-dir output/
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
@@ -94,11 +94,11 @@ Examples:
     annotate_parser.add_argument("--output-dir", "-o", required=True,
                                 help="Output directory (required)")
     
-    annotate_files = annotate_parser.add_argument_group('annotation files')
+    annotate_files = annotate_parser.add_argument_group('optional external annotations')
     annotate_files.add_argument("--files", "-f", nargs='+', default=[],
-                                help="Annotation files (BED, GFF/GTF, TSV). File format is auto-detected by extension.")
+                                help="Optional annotation files (BED, GFF/GTF, TSV). File format is auto-detected by extension.")
     annotate_files.add_argument("--names", "-n", nargs='+', default=[],
-                                help="Shorthand names for annotation files. Must match number of files.")
+                                help="Shorthand names for annotation files. Required if --files is used, must match number of files.")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--repeatmasker-n", type=int, default=0,
@@ -166,21 +166,24 @@ Example:
     args = parser.parse_args()
     
     if args.command == 'annotate':
-        if not args.files:
-            subparser.error("ERROR: At least one annotation file must be provided with --files")
-        
-        # Check that number of names matches number of files when names are provided
-        if args.names and len(args.names) != len(args.files):
-            subparser.error(f"ERROR: Number of names ({len(args.names)}) must match number of files ({len(args.files)})")
-        
-        # Check for duplicate names
-        if args.names and len(set(args.names)) != len(args.names):
-            subparser.error("ERROR: Duplicate names found in --names. Names must be unique.")
-        
-        # Validate that all files exist
-        for file_path in args.files:
-            if not os.path.exists(file_path):
-                subparser.error(f"ERROR: File does not exist: {file_path}")
+        # Only validate if files are provided
+        if args.files:
+            # Check that names are provided when files are provided
+            if not args.names:
+                subparser.error("ERROR: --names is required when --files is provided")
+            
+            # Check that number of names matches number of files
+            if len(args.names) != len(args.files):
+                subparser.error(f"ERROR: Number of names ({len(args.names)}) must match number of files ({len(args.files)})")
+            
+            # Check for duplicate names
+            if len(set(args.names)) != len(args.names):
+                subparser.error("ERROR: Duplicate names found in --names. Names must be unique.")
+            
+            # Validate that all files exist
+            for file_path in args.files:
+                if not os.path.exists(file_path):
+                    subparser.error(f"ERROR: File does not exist: {file_path}")
     
     return args
 

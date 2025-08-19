@@ -21,10 +21,10 @@ vesper/
 
 `vesper` performs three main functions: `call` (not implemented yet), `annotate`, and `refine`. You have two options for running `vesper`:
 
-1. `vesper annotate` - Provide a VCF file of candidate variants to be annotated and one or more BED/GFF files of annotations.
-    - Yields `{filename}.annotated.vcf.gz`: variants with annotations in the INFO field
-2. `vesper refine` - Provide a VCF file of (annotated) candidate variants to be refined and the supporting BAM file.
-    - Yields `{filename}.refined.vcf.gz`: variants with both annotations and confidence scores
+1. `vesper annotate` - Provide a VCF file to annotate insertion sequences with RepeatMasker. External BED/GFF/TSV annotations are optional.
+    - Yields `{filename}.annotated.vcf.gz`: variants with RepeatMasker results and optional external annotations in the INFO field
+2. `vesper refine` - Provide a VCF file and the supporting BAM file to calculate read-based confidence scores.
+    - Yields `{filename}.refined.vcf.gz`: variants with confidence scores based on read quality metrics
 
 ### Utilities (WIP)
 
