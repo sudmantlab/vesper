@@ -26,13 +26,13 @@ def process_annotate_chunk(variants: list, annotation_procs: list, chunk_idx: in
     """
     logger.info(f"Processing annotation chunk {chunk_idx} ({len(variants)} variants)")
     
-    # Annotates one by one
+    # Batch process GFF annotations (if any)
     if annotation_procs:
-        for variant in variants:
-            for proc in annotation_procs:
-                proc.annotate_variant(variant, proximal_span=config.proximal_span)
-            
-    # Batches insertions for external pass to RepeatMasker
+        logger.debug(f"Starting batch GFF annotation for {len(variants)} variants against {len(annotation_procs)} databases")
+        for proc in annotation_procs:
+            proc.batch_annotate_variants(variants, config.proximal_span)
+    
+    # Same variants batch processed by RepeatMasker
     with RepeatMaskerProcessor(config.output_dir) as repeatmasker_proc:
         repeatmasker_proc.batch_analysis(
             variants, 
@@ -83,11 +83,10 @@ def run_annotate(args, logger):
         annotation_procs = []
         
         if config.gff_files:
+            task = progress.add_task("[cyan]Loading annotations...", total=len(config.gff_files))
             for i, gff_file in enumerate(config.gff_files):
-                task = progress.add_task("[cyan]Loading files...", total=len(config.gff_files))
                 gff_name = config.gff_names[i]
-                progress.update(task, description=f"Loading file: {gff_file.name} ({gff_name})")
-                logger.info(f"Loading file: {gff_file.name} as '{gff_name}'")
+                logger.info(f"Loading annotations: {gff_file.name} as '{gff_name}'")
                 annotation_procs.append(GFFProcessor(gff_file, source_name=gff_name, rebuild=config.rebuild))
                 progress.update(task, advance=1)
 

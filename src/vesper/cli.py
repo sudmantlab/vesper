@@ -32,10 +32,6 @@ def parse_args():
     parser = VesperArgumentParser(
         formatter_class=RawDescriptionRichHelpFormatter,
         epilog="""
-    Recommended usage:
-    vesper call (optional + not yet available) → vesper annotate → vesper refine
-
-    - vesper call: provide a FASTQ file of PacBio HiFi reads for alignment and variant calling.
     - vesper annotate: provide a VCF file to annotate insertions with RepeatMasker (external annotations optional).
     - vesper refine: provide a VCF file and BAM to calculate read-based confidence scores.
 
@@ -44,49 +40,15 @@ def parse_args():
     )
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
-    # vesper call
-    call_parser = subparsers.add_parser('call',
-        help='Align reads* and call de novo structural variant candidates',
-        description='Align reads* and call de novo structural variant candidates.',
-        formatter_class=parser.formatter_class,
-        epilog = """
-Example:
-  vesper call --fastq input.fastq --output-dir output/
-        """
-        )
-    call_parser.add_argument("--fastq", "-f", required=True,
-                            help="fastq/fastq.gz file for alignment (required)")
-    call_parser.add_argument("--output-dir", "-o", required=True,
-                            help="Output directory (required)")
-    call_parser.add_argument("--threads", "-t", 
-                            default="8",
-                            help="Number of threads to use (integer or 'auto', default: 8)")
-    call_parser.add_argument("--logging",
-                            help="Log directory (default: output/logs)")
-    call_parser.add_argument("--debug", action="store_true",
-                            help="Enable debug logging")
-    call_parser.add_argument("--console-output", action="store_true",
-                            help="Enable logging to console (default: False)")
-
     # vesper annotate
     annotate_parser = subparsers.add_parser('annotate',
         help='Annotate insertion variants with RepeatMasker and optionally with genomic features',
         description='Annotate insertion sequences with RepeatMasker and optionally overlay genomic features.',
         formatter_class=parser.formatter_class,
         epilog = """
-Usage notes:
-  - RepeatMasker is automatically run on all insertion sequences
-  - External annotation files are OPTIONAL - provide with --files (format auto-detected by extension)
-  - Use --names to provide shorthand names for each file (required if --files is used)
-  - Names must be unique across all annotation files
-
 Examples:
-  # Run RepeatMasker only (default behavior)
-  vesper annotate --vcf input.vcf --output-dir output/
-  
-  # Add external annotations
-  vesper annotate --vcf input.vcf --files annotations.bed --names repeats --output-dir output/
-  vesper annotate --vcf input.vcf --files annotations1.bed annotations2.gff3.gz --names repeats genes --output-dir output/
+vesper annotate --vcf input.vcf --output-dir output/
+vesper annotate --vcf input.vcf --files annotations/segdups.gff annotations/repeats.gff --names segdups repeats --output-dir output/
         """
         )
     annotate_parser.add_argument("--vcf", "-v", required=True,
@@ -96,15 +58,15 @@ Examples:
     
     annotate_files = annotate_parser.add_argument_group('optional external annotations')
     annotate_files.add_argument("--files", "-f", nargs='+', default=[],
-                                help="Optional GFF/GTF annotation files. All files must be in GFF format.")
+                                help="GFF/GTF annotation file paths")
     annotate_files.add_argument("--names", "-n", nargs='+', default=[],
-                                help="Shorthand names for annotation files. Required if --files is used, must match number of files.")
+                                help="Space-delimited shorthand names for annotation files. Required if --files is used, must match number of files.")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,
                                 help="Distance (+/-) in base pairs to search for proximal features (default: 100)")
     annotate_parser.add_argument("--repeatmasker-n", type=int, default=0,
-                                help="Number of top-scoring repeat annotations to return per insertion (default: return all annotations)")
-    annotate_parser.add_argument("--threads", "-t", type=str, default="8",
-                                help="Number of threads to use (integer or 'auto' (defaults to 2x CPU count, up to 32), default: 8)")
+                                help="Number of top-scoring repeat annotations to return per insertion (default: all)")
+    annotate_parser.add_argument("--threads", "-t", type=int, default=4,
+                                help="Number of threads (default: 4)")
     annotate_parser.add_argument("--test-mode", type=int, default=None,
                                 help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     annotate_parser.add_argument("--logging",
@@ -138,8 +100,8 @@ Example:
                               help="Maximum allele frequency (default: 0.1)")
     refine_parser.add_argument("--test-mode", type=int, default=None,
                               help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
-    refine_parser.add_argument("--threads", type=str, default="8",
-                              help="Number of threads to use (integer or 'auto', default: 8)")
+    refine_parser.add_argument("--threads", type=int, default=4,
+                              help="Number of threads (default: 4)")
     refine_parser.add_argument("--auto-load-registry", choices=['True', 'False'], default='True',
                               help="Whether to automatically load existing registry if found (default: True)")
     refine_parser.add_argument("--force-new-registry", action="store_true",

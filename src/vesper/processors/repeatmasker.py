@@ -239,8 +239,8 @@ class RepeatMaskerProcessor:
                         repeat_start=repeat_start,
                         repeat_end=repeat_end,
                         repeat_left=repeat_left,
-                        match_length=round(query_end - query_begin + 1, 2),
-                        match_coverage=(query_end - query_begin + 1) / (query_end + query_left),
+                        match_length=query_end - query_begin + 1,
+                        match_coverage=round((query_end - query_begin + 1) / (query_end + query_left), 3),
                     )
                     
                     if query_name not in results:

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union, Type, Dict, Any
+from typing import List, Optional, Union, Type, Dict, Any, Tuple
 import logging
 import sqlite3
 import threading
@@ -158,6 +158,137 @@ class AnnotationProcessor(ABC):
             ))
         return results
     
+    def batch_find_overlaps(self, positions: List[Tuple[str, int]]) -> Dict[Tuple[str, int], List[GenomicInterval]]:
+        """Find overlapping features for multiple positions in a single query."""
+        if not positions:
+            return {}
+            
+        conn = self._get_connection()
+        
+        # Build UNION ALL query for all positions
+        union_parts = []
+        params = []
+        for chrom, pos in positions:
+            union_parts.append("SELECT ?, ?, chrom, start, end, metadata FROM intervals WHERE chrom = ? AND start <= ? AND end >= ?")
+            # params [0-1]: query variant at (chrom, pos) against union of dbs
+            # params [2-4]: formulate overlap query on union of dbs where chrom = chrom, start <= pos, end >= pos
+            params.extend([chrom, pos, chrom, pos, pos])
+        
+        query = " UNION ALL ".join(union_parts)
+        cursor = conn.execute(query, params)
+        
+        results = {}
+        for row in cursor.fetchall():
+            query_chrom, query_pos = row[0], row[1]
+            pos_key = (query_chrom, query_pos)
+            
+            if pos_key not in results:
+                results[pos_key] = []
+                
+            metadata = json.loads(row[5]) if row[5] else {}
+
+            # append interval: denote actual feature start/end points
+            results[pos_key].append(GenomicInterval(
+                source=self.source_name,
+                chrom=row[2],
+                start=row[3],
+                end=row[4],
+                metadata=metadata
+            ))
+        
+        return results
+
+    def batch_find_proximal(self, positions: List[Tuple[str, int]], span: int) -> Dict[Tuple[str, int], List[GenomicInterval]]:
+        """Find proximal features for multiple positions in a single query."""
+        if not positions:
+            return {}
+            
+        conn = self._get_connection()
+        
+        # Build UNION ALL query for all positions
+        union_parts = []
+        params = []
+        for chrom, pos in positions:
+            proximal_start = max(1, pos - span)
+            proximal_end = pos + span
+            
+            union_parts.append(
+                "SELECT ?, ?, chrom, start, end, metadata, MIN(ABS(start - ?), ABS(end - ?)) as distance "
+                "FROM intervals WHERE chrom = ? AND ((start BETWEEN ? AND ?) OR (end BETWEEN ? AND ?))"
+            )
+            params.extend([chrom, pos, pos, pos, chrom, proximal_start, proximal_end, proximal_start, proximal_end])
+            # params [0-1]: getquery variant at (chrom, pos) against union of dbs
+            # params [2-8]: formulate proximal query on union of dbs 
+                # [2-3] (pos, pos): MIN(ABS(start - pos), ABS(end - pos)) sets proximity span
+                # [4] (chrom): sets query chrom on union of dbs
+                # [5-6]: (proximal_start, proximal_end): intersect between feature start and proximal span
+                # [7-8]: (proximal_start, proximal_end): intersect between feature end and proximal span
+        
+        query = " UNION ALL ".join(union_parts) + " ORDER BY distance"
+        cursor = conn.execute(query, params)
+        
+        results = {}
+        for row in cursor.fetchall():
+            query_chrom, query_pos = row[0], row[1]
+            pos_key = (query_chrom, query_pos)
+            
+            if pos_key not in results:
+                results[pos_key] = []
+                
+            metadata = json.loads(row[5]) if row[5] else {}
+            metadata['distance'] = row[6]
+
+            # append interval: denote actual feature start/end points
+            results[pos_key].append(GenomicInterval(
+                source=self.source_name,
+                chrom=row[2],
+                start=row[3],
+                end=row[4],
+                metadata=metadata
+            ))
+        
+        return results
+
+    def batch_annotate_variants(self, variants: List, proximal_span: int) -> None:
+        """Annotate multiple variants in batch."""
+        if not variants:
+            return
+            
+        self.logger.info(f"Starting batch annotation for {self.source_name} with {len(variants)} variants")
+        start_time = time.time()
+        
+        positions = [(v.variant.chrom, v.variant.position) for v in variants]
+        
+        overlap_results = self.batch_find_overlaps(positions)
+        overlap_count = sum(len(features) for features in overlap_results.values())
+        self.logger.debug(f"Batch overlap query returned {overlap_count} features")
+        
+        proximal_results = self.batch_find_proximal(positions, proximal_span)
+        proximal_count = sum(len(features) for features in proximal_results.values())
+        self.logger.debug(f"Batch proximal query returned {proximal_count} features within {proximal_span}bp")
+        
+        # Assign results back to variants
+        for variant in variants:
+            pos_key = (variant.variant.chrom, variant.variant.position)
+            
+            # Add overlaps
+            overlaps = overlap_results.get(pos_key, [])
+            variant.overlapping_features.extend(overlaps)
+            
+            # Add proximals (avoiding duplicates)
+            proximals = proximal_results.get(pos_key, [])
+            seen = set()
+            overlapping_keys = {(f.chrom, f.start, f.end) for f in variant.overlapping_features}
+            
+            for feature in proximals:
+                feature_key = (feature.chrom, feature.start, feature.end)
+                if feature_key not in seen and feature_key not in overlapping_keys:
+                    variant.proximal_features.append(feature)
+                    seen.add(feature_key)
+        
+        elapsed = time.time() - start_time
+        self.logger.info(f"Completed batch annotation for {len(variants)} variants in {elapsed:.3f}s")
+
     def annotate_variant(self, variant, proximal_span) -> None:
         """Annotate a single variant."""
         overlaps = self._find_overlap(
@@ -180,8 +311,6 @@ class AnnotationProcessor(ABC):
             if feature_key not in seen and feature_key not in overlapping_keys:
                 variant.proximal_features.append(feature)
                 seen.add(feature_key)
-
-
 
 class GFFProcessor(AnnotationProcessor):
     """Implementation of GFF file processor."""

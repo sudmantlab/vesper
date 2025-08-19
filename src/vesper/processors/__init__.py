@@ -1,6 +1,6 @@
 from .vcf import VCFProcessor, VCFWriter
 from .reads import ReadProcessor
-from .annotations import AnnotationProcessor, BEDProcessor, GenomicInterval, GFFProcessor
+from .annotations import AnnotationProcessor, GenomicInterval, GFFProcessor
 from .repeatmasker import RepeatMaskerProcessor, RepeatMaskerResult
 
 __all__ = [
@@ -8,7 +8,6 @@ __all__ = [
     'VCFWriter',
     'ReadProcessor',
     'AnnotationProcessor',
-    'BEDProcessor',
     'GenomicInterval',
     'GFFProcessor',
     'RepeatMaskerProcessor',

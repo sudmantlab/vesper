@@ -3,52 +3,6 @@ from pathlib import Path
 from typing import Optional, List, Union
 import os
 
-def get_threads(threads_arg):
-    """Convert threads argument to an integer.
-    
-    Args:
-        threads_arg: String or integer specifying threads ('auto' or int)
-        
-    Returns:
-        int: Number of threads to use
-    """
-    if threads_arg == 'auto':
-        return min(32, max(8, os.cpu_count() * 2))
-    else:
-        try:
-            return int(threads_arg)
-        except ValueError:
-            try:
-                parsed = int(float(threads_arg))
-                print(f"WARNING: Only integer values are supported for threads. Converting {threads_arg} to {parsed}.")
-                return parsed
-            except ValueError:
-                print(f"WARNING: Invalid threads argument {threads_arg} could not be parsed, falling back to default (8)")
-                return 8
-
-@dataclass
-class CallConfig:
-    """Configuration for the call command."""
-    # Required arguments
-    fastq_file: Path
-    output_dir: Path
-    
-    # Optional arguments
-    log_dir: Optional[Path] = None  # output_dir/logs if not specified
-    debug: bool = False
-    threads: int = 8
-
-    @classmethod
-    def from_args(cls, args):
-        """Create CallConfig instance from parsed command line arguments."""
-        return cls(
-            fastq_file=Path(args.fastq),
-            output_dir=Path(args.output_dir),
-            log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
-            debug=args.debug,
-            threads=get_threads(args.threads)
-        )
-
 @dataclass
 class RefineConfig:
     """Configuration for the refine command."""
@@ -65,7 +19,7 @@ class RefineConfig:
     auto_load_registry: bool = True
     force_new_registry: bool = False
     test_mode: Optional[int] = None
-    threads: int = 8
+    threads: int = 4
 
     @classmethod
     def from_args(cls, args):
@@ -81,7 +35,7 @@ class RefineConfig:
             force_new_registry=args.force_new_registry,
             debug=args.debug,
             test_mode=args.test_mode,
-            threads=get_threads(args.threads)
+            threads=args.threads
         )
 
 @dataclass
@@ -102,7 +56,7 @@ class AnnotateConfig:
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
     test_mode: Optional[int] = None
-    threads: int = 8
+    threads: int = 4
     rebuild: bool = False
     
     @classmethod
@@ -116,7 +70,7 @@ class AnnotateConfig:
             test_mode=args.test_mode,
             proximal_span=args.proximal_span,
             repeatmasker_n=args.repeatmasker_n if args.repeatmasker_n > 0 else None, # Interpret 0 from CLI as None (keep all)
-            threads=get_threads(args.threads),
+            threads=args.threads,
             rebuild=args.rebuild if hasattr(args, 'rebuild') else False
         )
         
