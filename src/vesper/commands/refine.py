@@ -51,7 +51,7 @@ def run_refine(args, logger):
     
     logger.info(f"Using {n_threads} threads for parallel processing")
     logger.info(f"Processing {len(chunks)} chunks")
-    logger.debug(f"Spawning {n_threads} threads for parallel processing")
+
     start_time = time.time()
     with Progress(TextColumn("[bold blue]{task.description}"),
                  BarColumn(complete_style="green"),
@@ -89,7 +89,7 @@ def run_refine(args, logger):
         
         logger.debug("All threads completed, closing thread pool")
         elapsed = time.time() - start_time
-        logger.info(f"Completed refinement in {elapsed:.2f} seconds")
+        logger.info(f"Refined {len(variants)} variants in {elapsed:.2f} seconds")
 
         confidence_scores = [v.confidence for v in variants if v.confidence is not None]
         if confidence_scores:

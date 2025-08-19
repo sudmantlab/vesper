@@ -96,7 +96,7 @@ Examples:
     
     annotate_files = annotate_parser.add_argument_group('optional external annotations')
     annotate_files.add_argument("--files", "-f", nargs='+', default=[],
-                                help="Optional annotation files (BED, GFF/GTF, TSV). File format is auto-detected by extension.")
+                                help="Optional GFF/GTF annotation files. All files must be in GFF format.")
     annotate_files.add_argument("--names", "-n", nargs='+', default=[],
                                 help="Shorthand names for annotation files. Required if --files is used, must match number of files.")
     annotate_parser.add_argument("--proximal-span", type=int, default=100,

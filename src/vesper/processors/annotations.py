@@ -86,7 +86,7 @@ class AnnotationProcessor(ABC):
         """Placeholder for format-specific DB building logic."""
         pass
 
-    def find_overlaps(self, chrom: str, pos: int) -> List[GenomicInterval]:
+    def _find_overlap(self, chrom: str, pos: int) -> List[GenomicInterval]:
         """Find all features overlapping the given position.
         
         Args:
@@ -118,7 +118,7 @@ class AnnotationProcessor(ABC):
             ))
         return results
 
-    def find_proximal(self, chrom: str, pos: int, span: int = 100) -> List[GenomicInterval]:
+    def _find_proximal(self, chrom: str, pos: int, span: int = 100) -> List[GenomicInterval]:
         """Find features within span distance of the position.
         
         Args:
@@ -158,15 +158,15 @@ class AnnotationProcessor(ABC):
             ))
         return results
     
-    def _annotate_variant(self, variant, proximal_span) -> None:
+    def annotate_variant(self, variant, proximal_span) -> None:
         """Annotate a single variant."""
-        overlaps = self.find_overlaps(
+        overlaps = self._find_overlap(
             variant.variant.chrom,
             variant.variant.position
         )
         variant.overlapping_features.extend(overlaps)
         
-        proximal = self.find_proximal(
+        proximal = self._find_proximal(
             variant.variant.chrom,
             variant.variant.position,
             proximal_span
@@ -182,130 +182,6 @@ class AnnotationProcessor(ABC):
                 seen.add(feature_key)
 
 
-class BEDProcessor(AnnotationProcessor):
-    """Implementation of BED file processor."""
-    
-    def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'BEDProcessor':
-        """Create a new SQLite database from a BED file if it doesn't already exist.
-        
-        Args:
-            rebuild: If True, rebuild the database even if it exists
-            batch_size: Number of records to insert in each batch
-            
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If a BED field is empty when higher-numbered fields are present
-        """
-        if self.db_path is None:
-            self.db_path = self.filepath.with_suffix(self.filepath.suffix + '.sqlite')
-        
-        # Check if database already exists and is valid
-        if not rebuild and self.db_path.exists():
-            try:
-                # Test if we can connect and query
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='intervals'")
-                if cursor.fetchone() is not None:
-                    self.logger.info(f"Using existing database: {self.db_path}")
-                    conn.close()
-                    return self
-                conn.close()
-            except sqlite3.Error:
-                self.logger.warning(f"Existing database {self.db_path} appears corrupt, rebuilding...")
-                self.db_path.unlink(missing_ok=True)
-        
-        self.logger.info(f"Building new database from {self.filepath}")
-        conn = sqlite3.connect(str(self.db_path))
-        
-        # Drop existing table if rebuilding
-        conn.execute('DROP TABLE IF EXISTS intervals')
-        
-        # Create table with only mandatory fields plus metadata JSON
-        conn.execute('''
-            CREATE TABLE intervals (
-                chrom TEXT,
-                start INTEGER,
-                end INTEGER,
-                metadata TEXT  -- JSON field for all optional columns
-            )
-        ''')
-        conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
-        conn.execute('CREATE INDEX idx_chrom_end ON intervals (chrom, end)')
-
-        self.logger.info(f"Indexing {self.filepath}...")
-        batch = []
-
-        if str(self.filepath).endswith(('.gz', '.gzip')):
-            file_opener = gzip.open
-            mode = 'rt'
-        else:
-            file_opener = open
-            mode = 'r'
-
-        with file_opener(self.filepath, mode) as f:
-            for i, line in enumerate(f, start=1):  # 1-based line counting for error messages
-                if line.startswith('#') or not line.strip():
-                    continue
-                    
-                fields = line.strip().split('\t')
-                if len(fields) < 3: # BED requires 3 fields
-                    raise ValueError(f"Line {i}: BED format requires at least 3 fields, found {len(fields)}")
-                    
-                for idx, field in enumerate(fields[:3]):
-                    if not field.strip():
-                        raise ValueError(f"Line {i}: Mandatory BED field {idx+1} is empty")
-                    
-                # Convert BED's 0-based to 1-based for consistency with VCF
-                chrom = fields[0].strip(' ')
-                start = int(fields[1]) + 1
-                end = int(fields[2])
-                
-                optional = {3: ('name', str), 
-                            4: ('score', int), 
-                            5: ('strand', str), 
-                            6: ('thickStart', int), 
-                            7: ('thickEnd', int), 
-                            8: ('itemRgb', str), 
-                            9: ('blockCount', int), 
-                            10: ('blockSizes', str), 
-                            11: ('blockStarts', str)}
-                metadata = {}
-      
-                for idx, value in enumerate(fields[3:], start=3):
-                    if value == '': 
-                        value = "." # placeholder/empty sub
-                    elif idx <= 12:
-                        # Use the standard BED field name if within the standard BED fields
-                        metadata[optional[idx][0]] = optional[idx][1](value)
-                    else:
-                        metadata[f'field{idx}'] = str(value) # cast generic name/value pairs as strings
-                    
-                metadata_json = json.dumps(metadata) if metadata else '{}'
-                
-                batch.append((chrom, start, end, metadata_json))
-                
-                if len(batch) >= batch_size:
-                    conn.executemany(
-                        'INSERT INTO intervals VALUES (?, ?, ?, ?)',
-                        batch
-                    )
-                    conn.commit()
-                    batch = []
-                    self.logger.info(f"Processed {i:,} lines...")
-            
-            # Insert remaining records
-            if batch:
-                conn.executemany(
-                    'INSERT INTO intervals VALUES (?, ?, ?, ?)',
-                    batch
-                )
-                conn.commit()
-        
-        self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
-        conn.close()
-        return self
 
 class GFFProcessor(AnnotationProcessor):
     """Implementation of GFF file processor."""
@@ -438,157 +314,3 @@ class GFFProcessor(AnnotationProcessor):
         return self
 
 
-class TSVProcessor(AnnotationProcessor):
-    """Generic TSV file processor for files with genomic intervals.
-    
-    Processes tab-separated value files where the first three columns are:
-    1. chromosome/contig name
-    2. start position (0-based like BED)
-    3. end position
-    
-    The first row is assumed to contain column names. The names for the first three columns
-    are ignored (as they should always be chrom, start, end), but the names for any 
-    additional columns are used as field names in the metadata.
-    
-    Values are automatically converted to floats when possible, otherwise stored as strings.
-    """
-    
-    """Initialize TSV processor using the base class constructor.
-    
-    Args for constructor are same as parent:
-        filepath: Path to TSV file
-        source_name: Identifier for this annotation source
-        rebuild: If True, force rebuild of the database
-    """
-        
-    def _build_sqlite_db(self, rebuild: bool = False, batch_size: int = 100000) -> 'TSVProcessor':
-        """Create a new SQLite database from a TSV file if it doesn't already exist.
-        
-        Args:
-            rebuild: If True, rebuild the database even if it exists
-            batch_size: Number of records to insert in each batch
-            
-        Returns:
-            Self for method chaining
-            
-        Raises:
-            ValueError: If a TSV field is empty or malformed
-        """
-        if self.db_path is None:
-            self.db_path = self.filepath.with_suffix(self.filepath.suffix + '.sqlite')
-        
-        # Check if database already exists and is valid
-        if not rebuild and self.db_path.exists():
-            try:
-                # Test if we can connect and query
-                conn = sqlite3.connect(str(self.db_path))
-                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='intervals'")
-                if cursor.fetchone() is not None:
-                    self.logger.info(f"Using existing database: {self.db_path}")
-                    conn.close()
-                    return self
-                conn.close()
-            except sqlite3.Error:
-                self.logger.warning(f"Existing database {self.db_path} appears corrupt, rebuilding...")
-                self.db_path.unlink(missing_ok=True)
-        
-        self.logger.info(f"Building new database from {self.filepath}")
-        conn = sqlite3.connect(str(self.db_path))
-        
-        # Drop existing table if rebuilding
-        conn.execute('DROP TABLE IF EXISTS intervals')
-        
-        # Create table with only mandatory fields plus metadata JSON
-        conn.execute('''
-            CREATE TABLE intervals (
-                chrom TEXT,
-                start INTEGER,
-                end INTEGER,
-                metadata TEXT  -- JSON field for all optional columns
-            )
-        ''')
-        conn.execute('CREATE INDEX idx_chrom_start ON intervals (chrom, start)')
-        conn.execute('CREATE INDEX idx_chrom_end ON intervals (chrom, end)')
-
-        self.logger.info(f"Indexing {self.filepath}...")
-        batch = []
-
-        if str(self.filepath).endswith(('.gz', '.gzip')):
-            file_opener = gzip.open
-            mode = 'rt'
-        else:
-            file_opener = open
-            mode = 'r'
-
-        with file_opener(self.filepath, mode) as f:
-            # Read header row to get column names
-            header_row = next(f, None)
-            header_fields = {}
-            
-            if header_row:
-                cleaned_header = header_row.lstrip('#').strip()
-                header_columns = cleaned_header.split('\t')
-                
-                for idx, name in enumerate(header_columns[3:], start=3): # store optional column names
-                    if name.strip():
-                        header_fields[idx] = name.strip()
-            
-            for i, line in enumerate(f, start=2):
-                fields = line.strip().split('\t')
-                if len(fields) < 3:
-                    raise ValueError(f"Line {i}: TSV format requires at least 3 fields (chrom, start, end), found {len(fields)}")
-                    
-                for idx, field in enumerate(fields[:3]):
-                    if not field.strip():
-                        raise ValueError(f"Line {i}: Mandatory TSV field {idx+1} is empty")
-                    
-                # Convert BED-style 0-based to 1-based for consistency with VCF
-                try:
-                    chrom = fields[0].strip(' ')
-                    start = int(fields[1]) + 1  # Convert from 0-based BED to 1-based
-                    end = int(fields[2])
-                except ValueError:
-                    raise ValueError(f"Line {i}: Invalid genomic coordinates: {fields[1]}, {fields[2]}")
-                
-                metadata = {}
-                for idx, value in enumerate(fields[3:], start=3):
-                    value = value.strip()
-                    if not value:
-                        continue
-                    
-                    field_name = header_fields.get(idx, f"field{idx}")
-                    
-                    # attempt float/int conversion, otherwise str
-                    try:
-                        float_value = float(value)
-                        if float_value.is_integer():
-                            metadata[field_name] = int(float_value)
-                        else:
-                            metadata[field_name] = float_value
-                    except ValueError:
-                        metadata[field_name] = value
-                
-                metadata_json = json.dumps(metadata) if metadata else '{}'
-                
-                batch.append((chrom, start, end, metadata_json))
-                
-                if len(batch) >= batch_size:
-                    conn.executemany(
-                        'INSERT INTO intervals VALUES (?, ?, ?, ?)',
-                        batch
-                    )
-                    conn.commit()
-                    batch = []
-                    self.logger.info(f"Processed {i:,} lines...")
-            
-            # Insert remaining records
-            if batch:
-                conn.executemany(
-                    'INSERT INTO intervals VALUES (?, ?, ?, ?)',
-                    batch
-                )
-                conn.commit()
-        
-        self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
-        conn.close()
-        return self

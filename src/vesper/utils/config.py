@@ -87,51 +87,23 @@ class RefineConfig:
 @dataclass
 class AnnotateConfig:
     """Configuration for the annotate command."""
-    # Required arguments
     vcf_input: Path
     output_dir: Path
     
-    # Unified annotation files and names
-    annotation_files: List[Path] = None
-    annotation_names: List[str] = None
-    
-    # Internal organization by file type
-    bed_files: List[Path] = None
+    # Optional additional annotation
     gff_files: List[Path] = None
-    tsv_files: List[Path] = None
-    bed_names: List[str] = None
     gff_names: List[str] = None
-    tsv_names: List[str] = None
+
+    # RepeatMasker
+    proximal_span: int = 100
+    repeatmasker_n: Optional[int] = None # number of top-scoring repeat annotations to return (None = all)
     
-    # Optional arguments
+    # TODO: Trace logging inheritance 
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
     test_mode: Optional[int] = None
-    proximal_span: int = 100
-    repeatmasker_n: Optional[int] = None # number of top-scoring repeat annotations to return (None = all)
     threads: int = 8
     rebuild: bool = False
-
-    @staticmethod
-    def _detect_file_type(file_path):
-        """Detect file type based on file extension.
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            str: Detected file type ('bed', 'gff', or 'tsv')
-        """
-        file_str = str(file_path).lower()
-        if file_str.endswith(('.bed', '.bed.gz')):
-            return 'bed'
-        elif any(file_str.endswith(ext) for ext in ('.gff', '.gff3', '.gtf', '.gff.gz', '.gff3.gz', '.gtf.gz')):
-            return 'gff'
-        elif file_str.endswith(('.tsv', '.tsv.gz')):
-            return 'tsv'
-        else:
-            # For unknown extensions, default to TSV which is the most generic
-            return 'tsv'
     
     @classmethod
     def from_args(cls, args):
@@ -148,36 +120,15 @@ class AnnotateConfig:
             rebuild=args.rebuild if hasattr(args, 'rebuild') else False
         )
         
-        # Process unified files and names arguments
-        config.annotation_files = [Path(file) for file in args.files]
+        # Process GFF files and names
+        config.gff_files = [Path(file) for file in args.files]
         
-        # If names are provided, use them, otherwise use filenames without extension
         if args.names:
             if len(args.names) != len(args.files):
                 raise ValueError("Number of names must match number of files")
-            config.annotation_names = args.names
+            config.gff_names = args.names
         else:
             # Default to using the file stem (filename without extension)
-            config.annotation_names = [Path(file).stem for file in args.files]
-        
-        # Categorize files by type
-        config.bed_files = []
-        config.bed_names = []
-        config.gff_files = []
-        config.gff_names = []
-        config.tsv_files = []
-        config.tsv_names = []
-        
-        for i, file_path in enumerate(config.annotation_files):
-            file_type = cls._detect_file_type(file_path)
-            if file_type == 'bed':
-                config.bed_files.append(file_path)
-                config.bed_names.append(config.annotation_names[i])
-            elif file_type == 'gff':
-                config.gff_files.append(file_path)
-                config.gff_names.append(config.annotation_names[i])
-            elif file_type == 'tsv':
-                config.tsv_files.append(file_path)
-                config.tsv_names.append(config.annotation_names[i])
+            config.gff_names = [Path(file).stem for file in args.files]
             
         return config
