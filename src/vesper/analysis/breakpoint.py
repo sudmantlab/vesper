@@ -11,10 +11,6 @@ from ..models.reads import AlignedRead
 @dataclass
 class BreakpointContext:
     """Represents the sequence context around a variant breakpoint."""
-    left_ref_context: str  # Reference sequence upstream of breakpoint
-    right_ref_context: str  # Reference sequence downstream of breakpoint
-    ref_breakpoint_pos: int  # Position of the breakpoint
-
     read_name: Optional[str] = None  # Name of supporting read
     read_seq: Optional[str] = None  # Sequence of supporting read
     read_ins_coords: Optional[Tuple[int, int]] = None  # Insertion coordinates in supporting read
@@ -31,29 +27,13 @@ CIGAR_CONSUMES_QUERY = {0, 1, 4, 7, 8} # M, I, S, =, X
 class BreakpointAnalyzer:
     """Analyzes breakpoint contexts for structural variants."""
     
-    def __init__(self, reference_fasta: str, context_size: int = 25, debug: bool = False):
+    def __init__(self, context_size: int = 25, debug: bool = False):
         """
         Args:
-            reference_fasta: Path to reference genome FASTA file (must be indexed, e.g., with samtools faidx)
             context_size: Number of bases to extract on each side of breakpoint
         """
         self.context_size = context_size
-        self.reference_fasta = pysam.FastaFile(reference_fasta)
         self.debug = debug # returns read sequences in BreakpointContext
-        
-    def _get_reference_sequence(self, chrom: str, start: int, end: int) -> str:
-        """Get reference sequence for a genomic region using pysam."""
-        try:
-            return self.reference_fasta.fetch(chrom, start, end)
-        except ValueError as e:
-            # pysam raises ValueError for fetch on invalid region (e.g., start < 0)
-            # or if chromosome not found. Re-raise or handle appropriately.
-            # For now, return empty string, but logging/error might be better.
-            print(f"Error fetching sequence for {chrom}:{start}-{end}: {e}") # Consider proper logging
-            return ""
-        except KeyError as e:
-            print(f"Error: Chromosome '{chrom}' not found in FASTA file {self.reference_fasta.filename}. Ensure FASTA and index are correct.")
-            return ""
         
     def _find_insertion_in_read(self,read: AlignedRead, expected_len: int) -> Optional[Tuple[int, int, int]]:
         """
@@ -134,28 +114,6 @@ class BreakpointAnalyzer:
         # Return 0-based, exclusive end coordinates
         return start_pos, end_pos_inclusive + 1, alignment_length
     
-    def extract_ref_context(self, variant: Variant) -> BreakpointContext:
-        """Extract reference sequence context around variant breakpoint."""
-        # For insertions, the breakpoint is at the insertion point
-        # For deletions, it's at the start and end of the deletion
-        # For other SV types, we need to handle them appropriately
-        # TODO: actually handle other SV types
-        if variant.sv_type == SVType.INS:
-            start = max(0, variant.position - self.context_size)
-            end = variant.position + self.context_size
-            ref_seq = self._get_reference_sequence(variant.chrom, start, end)
-            left_ref_context = ref_seq[:self.context_size]
-            right_ref_context = ref_seq[-self.context_size:]
-            ref_breakpoint_pos = variant.position
-        else:
-            raise NotImplementedError(f"SV type {variant.sv_type} not supported (yet).") # TODO: idk this shouldn't be a problem but hold for now
-            
-        return BreakpointContext(
-            left_ref_context=left_ref_context,
-            right_ref_context=right_ref_context,
-            ref_breakpoint_pos=ref_breakpoint_pos
-        )
-    
     def _longest_common_substring(self, left: str, right: str) -> Optional[str]:
         """Find longest common substring between two strings.
         
@@ -184,32 +142,6 @@ class BreakpointAnalyzer:
                     left_start, right_start = i, j
 
         return (max_substring, len(max_substring), left_start, right_start)
-    
-    # def detect_microhomology(self, context: BreakpointContext, min_len: int = 4, max_len: int = 50) -> Optional[str]:
-    #     """
-    #     Detect microhomology at breakpoint by finding longest common substring.
-    #     Currently broken.
-
-    #     Args:
-    #         context: BreakpointContext object containing left and right context sequences
-    #         min_len: Minimum length of microhomology to detect
-    #         max_len: Maximum length of microhomology to detect
-
-    #     Returns:
-    #         A tuple of (True, microhomology_sequence, microhomology_length, (left_microhomology_start, right_microhomology_start)) if microhomology is found.
-    #         Else (False, 0, 0, (0, 0)).
-    #     """
-    #     left = context.left_ref_context
-    #     right = context.right_ref_context
-        
-    #     LCS, LCS_len, left_start, right_start = self._longest_common_substring(left, right)
-
-    #     if LCS and max_len >= LCS_len >= min_len:
-    #         # previously returned absolute coordinates, switch to relative
-    #         # return (True, LCS, LCS_len, (context.ref_breakpoint_pos - self.context_size + left_start, context.ref_breakpoint_pos + right_start))
-    #         return (True, LCS, LCS_len, (-self.context_size + left_start, right_start))
-    #     else:
-    #         return (False, 0, 0, (0, 0))
         
     def _is_homopolymer(self, sequence, threshold=0.7):
         """
@@ -440,9 +372,8 @@ class BreakpointAnalyzer:
     
     def analyze_breakpoint(self, variant_analysis: VariantAnalysis) -> BreakpointContext:
         """Perform comprehensive breakpoint analysis."""
-        context = self.extract_ref_context(variant_analysis.variant)
+        context = BreakpointContext()
         context = self._get_supporting_read(context, variant_analysis)
-        # context.microhomology = self.detect_microhomology(context)
         context.tsd = self.detect_tsd(context, variant_analysis)
         context.poly_a_tail = self.detect_poly_a_tail(context, variant_analysis)
         if self.debug:
