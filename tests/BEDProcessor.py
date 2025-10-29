@@ -99,7 +99,7 @@ def test_variants():
 
 def test_build_sqlite_db(simple_bed):
     """Test building SQLite DB from BED file."""
-    with BEDProcessor(simple_bed) as bed_proc:
+    with BEDProcessor(simple_bed):
         # DB should be created automatically
         db_path = simple_bed.with_suffix(simple_bed.suffix + '.sqlite')
         assert db_path.exists()

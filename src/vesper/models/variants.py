@@ -1,15 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import List, Optional, ClassVar, Pattern, Dict, Any
 import re
-import numpy as np
 from enum import Enum, auto
-import pysam
 import logging
 import json
 
 from .interval import GenomicInterval
 from .repeatmasker import RepeatMaskerResult
-from .reads import AlignedRead, ReadGroup
+from .reads import ReadGroup
 
 class SVType(Enum):
     """Structural variant type classifications for downstream logic."""

@@ -14,11 +14,12 @@ dependencies:
   - pysam==0.23.3
   - pandas==2.3.0
   - numpy==2.3.1
-  - pytest==8.4.1
+  - pytest==8.3.5
   - rich==1.7.0
   - rich-argparse==1.7.0
   - annotated-types==0.7.0
   - typing-extensions==4.12.2
+  - ruff==0.14.2
   - repeatmasker==4.1.2.p1
   - trf==4.09.1
   - rmblast==2.14.1

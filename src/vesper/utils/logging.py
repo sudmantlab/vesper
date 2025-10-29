@@ -1,10 +1,11 @@
 """Logging utilities for Vesper."""
 
+from __future__ import annotations
+
 import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 def setup_file_logging(log_dir: Path, command_name: str, debug: bool = False, console_output: bool = False) -> logging.Logger:

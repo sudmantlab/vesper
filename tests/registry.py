@@ -4,7 +4,6 @@ from pathlib import Path
 import shutil
 import pysam
 import pysam.bcftools
-import os
 import json
 from vesper.processors.reads import ReadProcessor
 from vesper.processors.vcf import VCFProcessor

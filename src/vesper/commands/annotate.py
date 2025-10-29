@@ -1,10 +1,9 @@
 """Command module for variant annotation functionality."""
 
-from pathlib import Path
+from __future__ import annotations
+
 import logging
 import time
-from datetime import datetime
-import os
 from glob import glob
 from concurrent.futures import ThreadPoolExecutor
 
@@ -69,7 +68,7 @@ def run_annotate(args, logger):
     
     
     start_time = time.time()
-    logger.info(f"Starting annotation pipeline")
+    logger.info("Starting annotation pipeline")
     logger.info(f"Using {n_threads} threads for parallel processing")
     logger.info(f"Processing {len(chunks)} variant chunks")
 
@@ -150,5 +149,5 @@ def run_annotate(args, logger):
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.annotated.vcf.gz')
     write_vcf_with_progress(output_vcf_path, variants, logger)
     
-    logger.info(f"Annotation pipeline completed successfully")
+    logger.info("Annotation pipeline completed successfully")
     print(f"Wrote {len(variants)} variants to {output_vcf_path}")

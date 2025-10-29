@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import os
 from pathlib import Path
-import logging
 import argparse
 import sys
 from rich_argparse import RawDescriptionRichHelpFormatter

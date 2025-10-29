@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable
 
 from vesper.utils.config import SummarizeConfig
 
@@ -34,12 +34,15 @@ def _gather_rows(vcf_path: Path, sample_name: str, output_handle, logger: loggin
     command = ["bcftools", "query", "-f", QUERY_FORMAT, str(vcf_path)]
     logger.debug(f"Running command: {' '.join(command)}")
 
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("bcftools not found in PATH") from exc
 
     assert process.stdout is not None
     for line in process.stdout:

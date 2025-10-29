@@ -1,15 +1,12 @@
 """Tests for RepeatMasker processor."""
 
-import os
 import tempfile
 import subprocess
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from dataclasses import dataclass, field
 
 from vesper.processors.repeatmasker import RepeatMaskerProcessor
-from vesper.models.variants import Variant, VariantAnalysis
 
 
 class MockVariant:
@@ -211,9 +208,9 @@ def test_parse_output_with_overlap(temp_dir, sample_out_with_overlap_file):
     var2_results = results["var2"]
     assert len(var2_results) == 3
     
-    assert var2_results[0]["is_secondary"] == False  # Non-overlapping
-    assert var2_results[1]["is_secondary"] == False  # Overlaps, primary relative to third annotation
-    assert var2_results[2]["is_secondary"] == True  # Overlaps, secondary relative to second annotation
+    assert not var2_results[0]["is_secondary"]  # Non-overlapping
+    assert not var2_results[1]["is_secondary"]  # Overlaps, primary relative to third annotation
+    assert var2_results[2]["is_secondary"]  # Overlaps, secondary relative to second annotation
 
 def test_parse_and_simplify(temp_dir, sample_out_file):
     """Test parsing and simplifying RepeatMasker results with a fixture."""

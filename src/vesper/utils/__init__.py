@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .config import AnnotateConfig, RefineConfig, SummarizeConfig
 from .logging import setup_file_logging
 from .common import load_variants, calculate_chunks, setup_output_directory, write_vcf_with_progress

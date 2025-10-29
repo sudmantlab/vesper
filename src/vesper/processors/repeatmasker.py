@@ -1,20 +1,22 @@
 """Module for handling RepeatMasker processing for insertion sequences."""
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 import shutil
-import tempfile
 import uuid
 import json
 from glob import glob
-from dataclasses import dataclass, field
 
-from ..models.variants import VariantAnalysis
 from ..models.repeatmasker import RepeatMaskerResult
+
+if TYPE_CHECKING:
+    from ..models.variants import VariantAnalysis
 
 class RepeatMaskerProcessor:
     """Process insertion sequences using RepeatMasker.
@@ -270,11 +272,11 @@ class RepeatMaskerProcessor:
         
         sorted_results = {}
         
-        for query_name, annotations in all_results.items():
-            if not annotations: # insertion seq not IDed w/ repetitive motif
+        for query_name, annos in all_results.items():
+            if not annos:  # insertion seq not IDed w/ repetitive motif
                 continue
                 
-            sorted_annotations = sorted(annotations, key=lambda x: (x.match_length), reverse=True)
+            sorted_annotations = sorted(annos, key=lambda x: x.match_length, reverse=True)
             sorted_results[query_name] = sorted_annotations
         
         return sorted_results

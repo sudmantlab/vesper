@@ -1,16 +1,10 @@
 import pytest
-import tempfile
 import shutil
 from pathlib import Path
 import pysam
-import os
-from datetime import datetime
 from vesper.processors.vcf import VCFProcessor, VCFWriter
 from vesper.processors.annotations import GenomicInterval
 from vesper.models.variants import SVType, Variant, VariantAnalysis
-from vesper.models.reads import ReadGroup
-import gzip
-import copy
 
 TEST_DATA_DIR = Path("tests/test_data")
 

@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
-from typing import Iterator, Tuple, Optional, Dict, List, Set, Any
+from __future__ import annotations
+
+from typing import Tuple, Optional, Dict, List, TYPE_CHECKING
 import pysam
 from pathlib import Path
 import logging
@@ -8,9 +9,11 @@ import json
 import threading
 import datetime
 
-from ..models.variants import Variant
 from ..models.reads import ReadGroup, AlignedRead
 from ..models.validation import ReadMetadata, VariantReadGroups, RegistryMetadata
+
+if TYPE_CHECKING:
+    from ..models.variants import Variant
 
 
 class ReadProcessor:

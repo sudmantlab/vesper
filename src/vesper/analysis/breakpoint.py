@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, TYPE_CHECKING
 import re
-import pysam
-from collections import Counter
 import edlib
 
-from ..models.variants import Variant, VariantAnalysis, SVType
-from ..models.reads import AlignedRead
+from ..models.variants import SVType
+
+if TYPE_CHECKING:
+    from ..models.variants import VariantAnalysis
+    from ..models.reads import AlignedRead
 
 @dataclass
 class BreakpointContext:
@@ -222,7 +225,6 @@ class BreakpointAnalyzer:
         read_len = len(read_seq)
 
         ins_start_in_read, ins_end_in_read = coords
-        ins_len = ins_end_in_read - ins_start_in_read # avoid bugs where SVLEN != read ins seq
         query_start, query_end = variant_analysis.repeatmasker_results[0].query_start, variant_analysis.repeatmasker_results[0].query_end
 
         lw_start = max(0, ins_start_in_read - self.context_size) # start upstream of ins start - in case query is downstream of ins (ex. minus strand insertion)
@@ -240,7 +242,8 @@ class BreakpointAnalyzer:
         best_exact_match = None
 
         for tsd_len in range(max_len, min_len - 1, -1):
-            if best_exact_match: break # Already found the longest possible exact match
+            if best_exact_match:
+                break  # Already found the longest possible exact match
             # Iterate starting positions in right_window
             for j in range(len(right_window) - tsd_len + 1):
                 substring_right = right_window[j : j + tsd_len]

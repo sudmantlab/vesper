@@ -1,5 +1,7 @@
 """Common pipeline utilities shared between commands."""
 
+from __future__ import annotations
+
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -53,7 +55,7 @@ def write_vcf_with_progress(output_path: Path, variants: List, logger: logging.L
         TimeRemainingColumn()
     ) as progress, VCFWriter(output_path) as vcf_writer:
         
-        task = progress.add_task(f"[cyan]Writing variants...", total=len(variants))
+        task = progress.add_task("[cyan]Writing variants...", total=len(variants))
         vcf_writer.write_header(variants)
         
         for i, variant in enumerate(variants):

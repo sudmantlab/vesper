@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional, Tuple, Any
-from enum import Enum
+from typing import List, Dict, Optional, Tuple
 
 
 class ReadMetadata(BaseModel):

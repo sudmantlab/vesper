@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Tuple
 from functools import cached_property
-from pathlib import Path
 
 import pysam
 

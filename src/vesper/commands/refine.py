@@ -1,10 +1,9 @@
 """Command module for variant refinement functionality."""
 
-from pathlib import Path
+from __future__ import annotations
+
 import logging
 import time
-import os
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
@@ -101,7 +100,7 @@ def run_refine(args, logger):
             confident_variants = [v for v in variants if v.confidence and v.confidence > 0.6]
             pct_confident = len(confident_variants) / len(variants) * 100
             
-            logger.info(f"Confidence score statistics:")
+            logger.info("Confidence score statistics:")
             logger.info(f"    Mean: {mean_conf:.3f}")
             logger.info(f"    Median: {median_conf:.3f}") 
             logger.info(f"    Min: {min_conf:.3f}")
@@ -113,5 +112,5 @@ def run_refine(args, logger):
     output_vcf_path = config.output_dir / config.vcf_input.name.replace('.vcf.gz', '.refined.vcf.gz')
     write_vcf_with_progress(output_vcf_path, variants, logger)
     
-    logger.info(f"Refinement pipeline completed successfully") 
+    logger.info("Refinement pipeline completed successfully") 
     print(f"Wrote {len(variants)} variants to {output_vcf_path}")

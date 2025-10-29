@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .vcf import VCFProcessor, VCFWriter
 from .reads import ReadProcessor
 from .annotations import AnnotationProcessor, GenomicInterval, GFFProcessor

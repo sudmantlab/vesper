@@ -1,14 +1,13 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union, Type, Dict, Any, Tuple
+from typing import List, Optional, Union, Dict, Tuple
 import logging
 import sqlite3
 import threading
-import os
 import time
 import gzip
-from concurrent.futures import ThreadPoolExecutor
 import json
 
 from ..models.interval import GenomicInterval
@@ -441,5 +440,3 @@ class GFFProcessor(AnnotationProcessor):
         self.logger.info(f"Completed indexing {self.filepath} -> {self.db_path}")
         conn.close()
         return self
-
-

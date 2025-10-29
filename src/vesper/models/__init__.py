@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .variants import Variant, SVType, VariantAnalysis
 from .reads import ReadGroup, AlignedRead
 from .interval import GenomicInterval

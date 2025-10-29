@@ -1,5 +1,6 @@
-from dataclasses import dataclass
-from typing import Iterator, Tuple, Optional, List, TextIO
+from __future__ import annotations
+
+from typing import Iterator, Optional, List, TextIO
 import pysam
 from pathlib import Path
 import logging
@@ -9,8 +10,7 @@ import gzip
 import tempfile
 import os
 
-from ..models.variants import Variant, SVType, VariantAnalysis
-from ..models.reads import ReadGroup, AlignedRead
+from ..models.variants import Variant, VariantAnalysis
 
 
 class VCFProcessor:
