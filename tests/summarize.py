@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vesper.commands.summarize import run_summarize, HEADER
+from vesper.commands.summarize import HEADER, run_summarize
 from vesper.utils import SummarizeConfig
 
 
@@ -25,14 +25,16 @@ def test_run_summarize_infers_samples(tmp_path, monkeypatch):
     vcf2.write_text("dummy")
     output_path = tmp_path / "summary.tsv"
 
-    outputs = iter([
-        "chr1\t1\tsample1_var\t10\tPASS\t1\tNONE\t0\t0\t10\t20\t100\t.\t.\n",
-        "chr2\t2\tsample2_var\t20\tPASS\t0.8\tMAPQ_DIFF\t5\t2\t25\t12\t200\t.\t.\n"
-    ])
+    outputs = iter(
+        [
+            "chr1\t1\tsample1_var\t10\tPASS\t1\tNONE\t0\t0\t10\t20\t100\t.\t.\n",
+            "chr2\t2\tsample2_var\t20\tPASS\t0.8\tMAPQ_DIFF\t5\t2\t25\t12\t200\t.\t.\n",
+        ]
+    )
 
     monkeypatch.setattr(
         "vesper.commands.summarize.subprocess.Popen",
-        lambda *args, **kwargs: DummyProcess(next(outputs))
+        lambda *args, **kwargs: DummyProcess(next(outputs)),
     )
 
     args = SimpleNamespace(
@@ -41,7 +43,7 @@ def test_run_summarize_infers_samples(tmp_path, monkeypatch):
         sample_names=None,
         logging=None,
         debug=False,
-        console_output=False
+        console_output=False,
     )
     config = SummarizeConfig.from_args(args)
 
@@ -64,7 +66,7 @@ def test_summarize_config_sample_name_mismatch():
         sample_names=["sample_a"],
         logging=None,
         debug=False,
-        console_output=False
+        console_output=False,
     )
     with pytest.raises(ValueError):
         SummarizeConfig.from_args(args)
@@ -79,7 +81,7 @@ def test_run_summarize_missing_bcftools(tmp_path, monkeypatch):
         sample_names=None,
         log_dir=tmp_path / "logs",
         debug=False,
-        console_output=False
+        console_output=False,
     )
 
     def raising_popen(*args, **kwargs):
