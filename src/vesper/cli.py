@@ -6,8 +6,8 @@ import argparse
 import sys
 from rich_argparse import RawDescriptionRichHelpFormatter
 
-from vesper.commands import run_refine, run_annotate
-from vesper.utils import setup_file_logging
+from vesper.commands import run_refine, run_annotate, run_summarize
+from vesper.utils import setup_file_logging, SummarizeConfig
 
 def display_ascii():
         print("""
@@ -34,6 +34,7 @@ def parse_args():
         epilog="""
     - vesper annotate: provide a VCF file to annotate insertions with RepeatMasker (external annotations optional).
     - vesper refine: provide a VCF file and BAM to calculate read-based confidence scores.
+    - vesper summarize: provide one or more refined VCFs to generate a TSV summary.
 
     View inputs & arguments for each command with vesper {command} --help.
         """
@@ -113,6 +114,30 @@ Example:
     refine_parser.add_argument("--console-output", action="store_true",
                               help="Enable logging to console (default: False)")
 
+    # vesper summarize
+    summarize_parser = subparsers.add_parser('summarize',
+        help='Summarize refined VCFs into a TSV',
+        description='Summarize refined VCFs into a TSV with confidence and annotation fields.',
+        formatter_class=parser.formatter_class,
+        epilog="""
+Examples:
+  vesper summarize --input sample1.vcf.gz sample2.vcf.gz --output summary.tsv
+  vesper summarize --input sample1.vcf.gz --output summary.tsv --sample-names SAMPLE1
+        """
+        )
+    summarize_parser.add_argument("--input", "-i", required=True, nargs='+',
+                                  help="Input VCF file(s) (bgzipped and indexed). Provide one or more paths.")
+    summarize_parser.add_argument("--output", "-o", required=True,
+                                  help="Output TSV file.")
+    summarize_parser.add_argument("--sample-names", "-s", nargs='+',
+                                  help="Optional sample names corresponding to each input. Must match number of inputs.")
+    summarize_parser.add_argument("--logging",
+                                  help="Log directory (default: <output-dir>/logs)")
+    summarize_parser.add_argument("--debug", action="store_true",
+                                  help="Enable debug logging")
+    summarize_parser.add_argument("--console-output", action="store_true",
+                                  help="Enable logging to console (default: False)")
+
     args, _ = parser.parse_known_args()
     if args.command is None:
         display_ascii()
@@ -123,6 +148,8 @@ Example:
         subparser = annotate_parser
     elif args.command == 'refine':
         subparser = refine_parser
+    elif args.command == 'summarize':
+        subparser = summarize_parser
 
     
     args = parser.parse_args()
@@ -146,7 +173,10 @@ Example:
             for file_path in args.files:
                 if not os.path.exists(file_path):
                     subparser.error(f"ERROR: File does not exist: {file_path}")
-    
+    elif args.command == 'summarize':
+        if args.sample_names and len(args.sample_names) != len(args.input):
+            subparser.error(f"ERROR: Number of sample names ({len(args.sample_names)}) must match number of inputs ({len(args.input)})")
+
     return args
 
 def main():
@@ -161,6 +191,10 @@ def main():
         log_dir = Path(args.logging) if args.logging else Path(args.output_dir) / 'logs'
         logger = setup_file_logging(log_dir, 'annotate', args.debug, args.console_output)
         run_annotate(args, logger)
+    elif args.command == 'summarize':
+        config = SummarizeConfig.from_args(args)
+        logger = setup_file_logging(config.log_dir, 'summarize', config.debug, config.console_output)
+        run_summarize(config, logger)
 
 if __name__ == "__main__":
     main()

@@ -86,3 +86,34 @@ class AnnotateConfig:
             config.gff_names = [Path(file).stem for file in args.files]
             
         return config
+
+@dataclass
+class SummarizeConfig:
+    """Configuration for the summarize command."""
+    vcf_inputs: List[Path]
+    output_path: Path
+    sample_names: Optional[List[str]] = None
+    log_dir: Optional[Path] = None
+    debug: bool = False
+    console_output: bool = False
+
+    @classmethod
+    def from_args(cls, args):
+        """Create SummarizeConfig instance from parsed command line arguments."""
+        input_paths = [Path(path) for path in args.input]
+        sample_names = args.sample_names if getattr(args, 'sample_names', None) else None
+
+        if sample_names and len(sample_names) != len(input_paths):
+            raise ValueError("Number of sample names must match number of input files")
+
+        output_path = Path(args.output)
+        log_dir = Path(args.logging) if getattr(args, 'logging', None) else output_path.parent / 'logs'
+
+        return cls(
+            vcf_inputs=input_paths,
+            output_path=output_path,
+            sample_names=sample_names,
+            log_dir=log_dir,
+            debug=getattr(args, 'debug', False),
+            console_output=getattr(args, 'console_output', False)
+        )
