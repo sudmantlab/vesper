@@ -104,10 +104,6 @@ Example:
                               help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     refine_parser.add_argument("--threads", type=int, default=4,
                               help="Number of threads (default: 4)")
-    refine_parser.add_argument("--auto-load-registry", choices=['True', 'False'], default='True',
-                              help="Whether to automatically load existing registry if found (default: True)")
-    refine_parser.add_argument("--force-new-registry", action="store_true",
-                              help="Forces rebuilding of registry even if one exists.")
     refine_parser.add_argument("--logging",
                               help="Log directory (default: output/logs)")
     refine_parser.add_argument("--debug", action="store_true",

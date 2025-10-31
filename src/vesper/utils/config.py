@@ -17,8 +17,6 @@ class RefineConfig:
     debug: bool = False
     min_support: int = 1
     max_af: float = 0.1
-    auto_load_registry: bool = True
-    force_new_registry: bool = False
     test_mode: Optional[int] = None
     threads: int = 4
 
@@ -32,8 +30,6 @@ class RefineConfig:
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
             min_support=args.min_support,
             max_af=args.max_af,
-            auto_load_registry=args.auto_load_registry == 'True',
-            force_new_registry=args.force_new_registry,
             debug=args.debug,
             test_mode=args.test_mode,
             threads=args.threads

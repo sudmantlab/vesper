@@ -30,8 +30,6 @@ def process_refine_chunk(variants: list, read_proc: ReadProcessor, chunk_idx: in
         variant._calculate_grouped_metrics()
         variant._calculate_confidence()
     
-    # Save registry after each chunk (if modified)
-    read_proc.save_registry()
     logger.info(f"Completed refinement chunk {chunk_idx}")
 
 def run_refine(args, logger):
@@ -57,9 +55,7 @@ def run_refine(args, logger):
                  TaskProgressColumn(),
                  TimeElapsedColumn(),
                  TimeRemainingColumn()) as progress, \
-         ReadProcessor(config.bam_file, registry_dir=config.output_dir / 'read_registry',
-                      auto_load_registry=config.auto_load_registry,
-                      force_new_registry=config.force_new_registry) as read_proc, \
+         ReadProcessor(config.bam_file) as read_proc, \
          ThreadPoolExecutor(max_workers=n_threads) as executor:
         task = progress.add_task("[cyan]Refining variants...", total=len(variants))  
         
@@ -81,7 +77,6 @@ def run_refine(args, logger):
                 completed_variants += chunk_size
                 progress.update(task, advance=chunk_size)
                 logger.debug(f"Progress: {completed_variants}/{len(variants)} variants completed ({completed_variants/len(variants)*100:.1f}%)")
-                read_proc.save_registry(force=True)
             except Exception as e:
                 logger.error(f"Error processing chunk: {str(e)}")
                 raise
