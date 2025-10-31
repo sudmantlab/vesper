@@ -7,7 +7,7 @@ def get_specimens():
 
 rule all:
     input:
-        expand("output/{specimen}/{specimen}.annotated.refined.vcf.gz", specimen=get_specimens())
+        expand("output/{specimen}/{specimen}.summary.tsv", specimen=get_specimens())
 
 rule pre_filter_vcf:
     input:
@@ -63,4 +63,17 @@ rule refine_vcf:
     shell:
         """
         vesper refine --vcf {input.vcf} --bam {input.bam} --output-dir output/{wildcards.specimen} --threads {threads}
+        """
+
+rule summarize_vcf:
+    input:
+        "output/{specimen}/{specimen}.annotated.refined.vcf.gz"
+    output:
+        "output/{specimen}/{specimen}.summary.tsv"
+    threads: 1
+    shell:
+        """
+        vesper summarize \
+            --input {input} \
+            --output {output} \
         """
