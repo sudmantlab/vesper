@@ -8,6 +8,7 @@ dependencies:
   - uv==0.6.11
   - h5py==3.13.0
   - pydantic==2.10.6
+  - jupyter==1.1.1
   - nbformat==5.10.4
   - nbconvert==7.16.6
   - bedtools==2.31.1
@@ -26,3 +27,4 @@ dependencies:
   - repeatmasker==4.1.2.p1
   - trf==4.09.1
   - rmblast==2.14.1
+  - edlib==1.3.9.post1

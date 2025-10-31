@@ -59,19 +59,24 @@ class ContextExtractor:
             return self._placeholder_context(variant_ctx, read, support_rank, reason="missing_event")
 
         ins_start, ins_end, event_length = coords
+        legacy_ins_start = max(0, ins_start - 1)
 
         repeat_start_rel = variant_ctx.metadata.get("repeat_query_start")
         repeat_end_rel = variant_ctx.metadata.get("repeat_query_end")
 
         if variant_ctx.variant.sv_type == SVType.INS:  # may also work for DUP, sniffles2 offers conversion of DUP to DEL
-            left_start = max(0, ins_start - self.context_size)
+            left_start = max(0, legacy_ins_start - self.context_size)
             if isinstance(repeat_start_rel, int) and repeat_start_rel >= 0:
-                left_end = min(len(read.sequence), ins_start + repeat_start_rel)
+                left_end = min(len(read.sequence), legacy_ins_start + repeat_start_rel)
             else:
-                left_end = ins_start
+                left_end = legacy_ins_start
 
             if isinstance(repeat_end_rel, int) and repeat_end_rel >= 0:
-                right_start = min(len(read.sequence), ins_start + repeat_end_rel)
+                right_start_candidate = min(len(read.sequence), legacy_ins_start + repeat_end_rel)
+                if right_start_candidate > ins_end:
+                    right_start = ins_end
+                else:
+                    right_start = right_start_candidate
             else:
                 right_start = ins_end
 
@@ -82,10 +87,10 @@ class ContextExtractor:
             insert_seq = read.sequence[ins_start:ins_end]
             right_seq = read.sequence[right_start:right_end]
         else:  # scaffolding for future buildout on DEL types
-            left_start = max(0, ins_start - self.context_size)
-            left_end = ins_start
-            right_start = ins_start
-            right_end = min(len(read.sequence), ins_start + self.context_size)
+            left_start = max(0, legacy_ins_start - self.context_size)
+            left_end = legacy_ins_start
+            right_start = legacy_ins_start
+            right_end = min(len(read.sequence), legacy_ins_start + self.context_size)
             left_seq = read.sequence[left_start:left_end]
             insert_seq = "."
             right_seq = read.sequence[right_start:right_end]
@@ -93,6 +98,7 @@ class ContextExtractor:
         metadata = dict(variant_ctx.metadata)
         metadata["context_status"] = "ok"
         metadata["event_length"] = event_length
+        metadata.setdefault("context_size", self.context_size)
 
         return BreakpointReadContext(
             sample_id=variant_ctx.sample_id,
@@ -104,7 +110,7 @@ class ContextExtractor:
             sv_length=variant_ctx.variant.sv_length,
             strand=read.strand,
             support_rank=support_rank,
-            ins_start=ins_start,
+            ins_start=legacy_ins_start,
             ins_end=ins_end,
             left_seq=left_seq if left_seq else ".",
             insert_seq=insert_seq if insert_seq else ".",
@@ -121,10 +127,11 @@ class ContextExtractor:
         read: ExtractedSupportRead,
         support_rank: int,
         reason: str,
-    ) -> BreakpointReadContext:
+        ) -> BreakpointReadContext:
         metadata = dict(variant_ctx.metadata)
         metadata["context_status"] = reason
         metadata.setdefault("event_length", variant_ctx.variant.sv_length)
+        metadata.setdefault("context_size", self.context_size)
         return BreakpointReadContext(
             sample_id=variant_ctx.sample_id,
             variant_id=variant_ctx.variant.ID,
@@ -156,7 +163,7 @@ class ContextExtractor:
 
     def _find_event_in_read(
         self,
-        read: SupportReadSlice,
+        read: ExtractedSupportRead,
         sv_type: SVType,
         expected_len: int,
     ) -> Optional[Tuple[int, int, int]]:
@@ -176,25 +183,28 @@ class ContextExtractor:
 
         for op, length in read.cigartuples:
             if op == target_op:
+                skip = False
                 if expected_len and abs(length - expected_len) > tolerance and best is not None:
-                    continue
-                if sv_type == SVType.INS:
-                    candidate_start = query_idx
-                    candidate_end = query_idx + length
-                else:
-                    candidate_start = query_idx
-                    candidate_end = query_idx
+                    skip = True
 
-                candidate = (length, candidate_start, candidate_end)
+                if not skip:
+                    if sv_type == SVType.INS:
+                        candidate_start = query_idx
+                        candidate_end = query_idx + length
+                    else:
+                        candidate_start = query_idx
+                        candidate_end = query_idx
 
-                if best is None:
-                    best = candidate
-                else:
-                    if expected_len:
-                        if abs(length - expected_len) < abs(best[0] - expected_len):
-                            best = candidate
-                    elif length > best[0]:
+                    candidate = (length, candidate_start, candidate_end)
+
+                    if best is None:
                         best = candidate
+                    else:
+                        if expected_len:
+                            if abs(length - expected_len) < abs(best[0] - expected_len):
+                                best = candidate
+                        elif length > best[0]:
+                            best = candidate
             if op in CIGAR_CONSUMES_QUERY:
                 query_idx += length
 
