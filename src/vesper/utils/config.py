@@ -17,7 +17,6 @@ class RefineConfig:
     debug: bool = False
     min_support: int = 1
     max_af: float = 0.1
-    test_mode: Optional[int] = None
     threads: int = 4
 
     @classmethod
@@ -31,7 +30,6 @@ class RefineConfig:
             min_support=args.min_support,
             max_af=args.max_af,
             debug=args.debug,
-            test_mode=args.test_mode,
             threads=args.threads
         )
 
@@ -52,7 +50,6 @@ class AnnotateConfig:
     # TODO: Trace logging inheritance 
     log_dir: Optional[Path] = None  # output_dir/logs if not specified
     debug: bool = False
-    test_mode: Optional[int] = None
     threads: int = 4
     rebuild: bool = False
     
@@ -64,7 +61,6 @@ class AnnotateConfig:
             output_dir=Path(args.output_dir),
             log_dir=Path(args.logging) if args.logging else Path(args.output_dir) / 'logs',
             debug=args.debug,
-            test_mode=args.test_mode,
             proximal_span=args.proximal_span,
             repeatmasker_n=args.repeatmasker_n if args.repeatmasker_n > 0 else None, # Interpret 0 from CLI as None (keep all)
             threads=args.threads,

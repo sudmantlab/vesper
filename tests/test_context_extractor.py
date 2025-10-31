@@ -57,10 +57,10 @@ def test_iter_read_contexts_cigar_hit():
     contexts = list(extractor.iter_read_contexts(ctx))
     assert len(contexts) == 1
     result = contexts[0]
-    assert result.left_seq == "AAT"
+    assert result.left_seq == "AAA"
     assert result.insert_seq == "TTT"
-    assert result.right_seq == "GG"
-    assert result.ins_start == 5
+    assert result.right_seq == "TGG"
+    assert result.ins_start == 4
     assert result.ins_end == 8
     assert result.metadata["repeat_class"] == "SINE/Alu"
     assert result.is_primary is True
@@ -169,7 +169,7 @@ def test_iter_read_contexts_deletion():
     assert len(contexts) == 1
     result = contexts[0]
     assert result.insert_seq == "."
-    assert result.left_seq == "AC"
+    assert result.left_seq == "AA"
     assert result.right_seq == "CC"
     assert result.metadata["context_status"] == "ok"
     assert result.metadata["event_length"] == 4

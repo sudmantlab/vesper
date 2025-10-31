@@ -11,13 +11,13 @@ from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn, T
 from vesper.processors.vcf import VCFProcessor, VCFWriter
 
 
-def load_variants(vcf_path: Path, test_mode: int = None, logger: logging.Logger = None) -> List:
+def load_variants(vcf_path: Path, logger: logging.Logger = None) -> List:
     """Load variants from VCF file."""
     if logger:
         logger.info(f"Loading variants from {vcf_path}")
     
     variants = []
-    with VCFProcessor(vcf_path, test_mode=test_mode) as vcf_proc:
+    with VCFProcessor(vcf_path) as vcf_proc:
         variants = list(vcf_proc.instantiate_variants())
     
     if logger:

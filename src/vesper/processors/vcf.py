@@ -16,11 +16,10 @@ from ..models.variants import Variant, VariantAnalysis
 class VCFProcessor:
     """Handles reading VCF files and creating Variant + VariantAnalysis objects."""
     
-    def __init__(self, vcf_path: Path, test_mode: Optional[int] = None):
+    def __init__(self, vcf_path: Path):
         self.vcf_path = vcf_path
         self._vcf: Optional[pysam.VariantFile] = None
         self.logger = logging.getLogger(__name__)
-        self.test_mode = test_mode
     
     def __enter__(self):
         """Open VCF file and check/create index."""
@@ -49,10 +48,6 @@ class VCFProcessor:
     def instantiate_variants(self) -> Iterator[VariantAnalysis]:
         """Create VariantAnalysis objects from records in a VCF file.
         
-        Args:
-            test_mode: If an integer, only loads that many records from VCF.
-                      If None, loads all records.
-        
         Yields:
             VariantAnalysis objects for each record in the VCF
             
@@ -63,10 +58,7 @@ class VCFProcessor:
         if not self._vcf:
             raise RuntimeError("VCF file not opened. Use with-statement to open file.")
             
-        for i, record in enumerate(self._vcf):
-            if self.test_mode is not None and i >= self.test_mode:
-                break
-                
+        for record in self._vcf:
             try:
                 base_variant = Variant.from_pysam_record(record)
                 analysis = VariantAnalysis(variant=base_variant)

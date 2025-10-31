@@ -47,9 +47,6 @@ def run_annotate(args, logger):
     """Run the annotation pipeline."""
     config = AnnotateConfig.from_args(args)
 
-    if config.test_mode is not None:
-        logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
-        
     total_annotation_files = len(config.gff_files) if config.gff_files else 0
     if total_annotation_files > 0:
         logger.info(f"Using {total_annotation_files} external GFF annotation file(s):")
@@ -60,7 +57,7 @@ def run_annotate(args, logger):
         logger.info("No external annotation files provided")
 
     setup_output_directory(config.output_dir, logger)
-    variants = load_variants(config.vcf_input, config.test_mode, logger)
+    variants = load_variants(config.vcf_input, logger)
     
     # TODO: set config options for memory, etc.
     n_threads = config.threads

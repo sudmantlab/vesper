@@ -69,8 +69,6 @@ vesper annotate --vcf input.vcf --files annotations/segdups.gff annotations/repe
                                 help="Number of top-scoring repeat annotations to return per insertion (default: all)")
     annotate_parser.add_argument("--threads", "-t", type=int, default=4,
                                 help="Number of threads (default: 4)")
-    annotate_parser.add_argument("--test-mode", type=int, default=None,
-                                help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     annotate_parser.add_argument("--logging",
                                 help="Log directory (default: output/logs)")
     annotate_parser.add_argument("--debug", action="store_true",
@@ -88,7 +86,6 @@ vesper annotate --vcf input.vcf --files annotations/segdups.gff annotations/repe
         epilog="""
 Example:
   vesper refine --vcf input.vcf --bam input.bam --output-dir output/
-  vesper refine --vcf input.vcf --bam input.bam --output-dir output/ --test-mode 50
         """)
     refine_parser.add_argument("--vcf", "-v", required=True,
                               help="Input VCF file (required)")
@@ -100,8 +97,6 @@ Example:
                               help="Minimum supporting reads (default: 1)")
     refine_parser.add_argument("--max-af", type=float, default=0.1,
                               help="Maximum allele frequency (default: 0.1)")
-    refine_parser.add_argument("--test-mode", type=int, default=None,
-                              help="Run in test mode with limited variants. Specify the number of variants to process (default: disabled)")
     refine_parser.add_argument("--threads", type=int, default=4,
                               help="Number of threads (default: 4)")
     refine_parser.add_argument("--logging",

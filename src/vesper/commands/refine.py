@@ -36,11 +36,8 @@ def run_refine(args, logger):
     """Run the refinement pipeline."""
     config = RefineConfig.from_args(args)
     
-    if config.test_mode is not None:
-        logger.info(f"Running in test mode (limited to {config.test_mode} variants)")
-
     setup_output_directory(config.output_dir, logger)
-    variants = load_variants(config.vcf_input, config.test_mode, logger)
+    variants = load_variants(config.vcf_input, logger)
 
     # TODO: set config options for memory
     n_threads = config.threads
