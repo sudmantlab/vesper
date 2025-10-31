@@ -144,12 +144,22 @@ class ReadProcessor:
         read_name = read.query_name
         
         with self._registry_lock:
-            if read_name in self._read_registry:
-                return self._read_registry[read_name]
-            else:
-                aligned_read = AlignedRead.from_pysam_read(read)
-                self._read_registry[read_name] = aligned_read
-                return aligned_read
+            existing = self._read_registry.get(read_name)
+            if existing is not None:
+                # Upgrade cached entry if a primary alignment appears later
+                existing_is_primary = not existing.is_secondary and not existing.is_supplementary
+                incoming_is_primary = not read.is_secondary and not read.is_supplementary
+                if incoming_is_primary and not existing_is_primary:
+                    aligned_read = AlignedRead.from_pysam_read(read)
+                    self._read_registry[read_name] = aligned_read
+                    self._registry_modified = True
+                    return aligned_read
+                return existing
+
+            aligned_read = AlignedRead.from_pysam_read(read)
+            self._read_registry[read_name] = aligned_read
+            self._registry_modified = True
+            return aligned_read
     
     def get_read_groups(self, variant: Variant) -> Tuple[ReadGroup, ReadGroup]:
         """Get supporting and non-supporting read groups for a variant.
