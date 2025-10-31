@@ -26,6 +26,7 @@ nest-asyncio==1.6.0
 numpy==2.2.3
 packaging==24.2
 pandas==2.2.3
+pyarrow==22.0.0
 parso==0.8.4
 pathspec==0.12.1
 pexpect==4.9.0

@@ -8,11 +8,14 @@ dependencies:
   - uv==0.6.11
   - h5py==3.13.0
   - pydantic==2.10.6
+  - nbformat==5.10.4
+  - nbconvert==7.16.6
   - bedtools==2.31.1
   - samtools==1.22
   - bcftools==1.22
   - pysam==0.23.3
   - pandas==2.3.0
+  - pyarrow==22.0.0
   - numpy==2.3.1
   - pytest==8.3.5
   - rich==1.7.0
