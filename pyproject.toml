@@ -5,33 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "vesper"
 version = "0.1.0"
-description = "Ultra-low frequency structural variant calling for PacBio HiFi data."
+description = "Toolkit for annotating and refining *de novo* transposable elements (TEs) from PacBio HiFi data."
 authors = [
-    { name = "voidshapes", email = "test_email@pleaseignore.com" }
+    { name = "stacy", email = "stacy-l@berkeley.edu" }
 ]
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = [
-    "pysam==0.23.0",
-    "pandas==2.2.3",
-    "numpy==2.2.3",
-    "rich==13.9.4",
-    "rich-argparse==1.7.0",
-    "pydantic==2.10.6",
-    "pydantic-core==2.27.2",
-    "annotated-types==0.7.0",
-    "typing-extensions==4.12.2",
-    "edlib==1.3.9.post1"
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest==8.3.5",
-    "pytest-cov==6.0.0",
-    "black==25.1.0",
-    "isort==6.0.1",
-    "coverage==7.6.12"
-]
+dependencies = []
 
 [project.scripts]
 vesper = "vesper.cli:main"

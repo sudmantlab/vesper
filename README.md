@@ -1,5 +1,5 @@
 # vesper
-`vesper` is a toolkit for annotating and refining *de novo* transposable elements (TEs) in PacBio HiFi data.
+`vesper` is a toolkit for annotating and refining *de novo* transposable elements (TEs) from PacBio HiFi data.
 
 ```
 vesper/
@@ -51,10 +51,10 @@ conda activate vesper
 3. Install `vesper` via `pip` or `uv` (`bioconda` upload soon!)
 ```bash
 # pip
-pip install -e ".[dev]"
+pip install -e .
 
 # uv
-uv pip install -e ".[dev]"
+uv pip install -e .
 ```
 
 4. Verify that everything is installed:
@@ -70,3 +70,13 @@ A typical `vesper` run takes an input VCF from `sniffles2` using `--qc-all` mode
 ## Documentation
 
 Extended documentation for `vesper annotate` and `vesper refine` are available in the `docs/` folder.
+
+## Troubleshooting
+
+`environment.yml` requests `repeatmasker==4.1.2.p1` which may cause some errors due to `python` shebang line at the head of certain files (`'share/RepeatMasker/famdb.py`, `share/RepeatMasker/util/RM2Bed.py`)
+
+```
+#!/usr/bin/env python3
+```
+
+You can remedy this by simply modifying it to refer to `python` instead of `python3`. You may be able to install a newer version of RepeatMasker as well: this behavior has been tricky to replicate, so please file an issue if you find a way to consistently resolve it.
